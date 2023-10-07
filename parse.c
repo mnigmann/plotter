@@ -475,7 +475,25 @@ int parse_latex_rec(char *latex, int end, function *function_list, double *stack
             function_list[last_pos+1].next_arg = function_list+func_pos;
             func_pos += PARSE_LATEX_REC(latex+2+i, superscript - i - 2, function_list+func_pos);
             i = superscript;
-        } else if (latex[i] == '\\') {
+        }
+        // Check if the previous term has a coordinate (.x or .y)
+        else if ((func_pos > 0) && (latex[i] == '.')) {
+            shift_blocks(function_list, last_pos, func_pos-last_pos);
+            func_pos++;
+            if (latex[i+1] == 'x') {
+                function_list[last_pos] = new_function(func_extract_x, function_list[last_pos+1].next_arg, function_list+last_pos+1);
+                function_list[last_pos+1].next_arg = NULL;
+            } else if (latex[i+1] == 'y') {
+                function_list[last_pos] = new_function(func_extract_y, function_list[last_pos+1].next_arg, function_list+last_pos+1);
+                function_list[last_pos+1].next_arg = NULL;
+            } else {
+                printf("ERROR: invalid character after dot operator\n");
+                exit(EXIT_FAILURE);
+            }
+            i ++;
+        }
+        
+        else if (latex[i] == '\\') {
             cmd_end = i+1;
             while (('a' <= latex[cmd_end]) && (latex[cmd_end] <= 'z')) cmd_end++;
             cmd_len = cmd_end - i - 1;
@@ -631,7 +649,8 @@ int parse_latex_rec(char *latex, int end, function *function_list, double *stack
                 uint8_t flags;
                 for (int j=0; variable_list[j].name; j++) {
                     uint8_t flags = variable_list[j].flags;
-                    if ((flags & VARIABLE_IN_SCOPE) && (strncmp(variable_list[j].name, latex+cmd_start-1, cmd_len+1) == 0)) {
+                    if ((flags & VARIABLE_IN_SCOPE) && (strncmp(variable_list[j].name, latex+cmd_start-1, cmd_end) == 0) && 
+                            (strlen(variable_list[j].name) == cmd_end)) {
                         varindex = j;
                         if (flags & VARIABLE_ARGUMENT) break; // If an argument is in scope, prefer it
                     }
@@ -713,7 +732,7 @@ int parse_latex_rec(char *latex, int end, function *function_list, double *stack
                 uint8_t flags;
                 for (int j=0; variable_list[j].name; j++) {
                     uint8_t flags = variable_list[j].flags;
-                    if ((flags & VARIABLE_IN_SCOPE) && (strncmp(variable_list[j].name, latex+start, subscript-start+1) == 0)) {
+                    if ((flags & VARIABLE_IN_SCOPE) && (strncmp(variable_list[j].name, latex+start, subscript-start+1) == 0) && (strlen(variable_list[j].name)==subscript-start+1)) {
                         varindex = j;
                         if (flags & VARIABLE_ARGUMENT) break; // If an argument is in scope, prefer it
                     }
@@ -1157,7 +1176,11 @@ int parse_file(char *fname, function *function_list, double *stack, variable *va
             printf("evaluating variable %s\n", expr->var->name);
             expr->var->pointer = stack+stack_size;
             type = (expr->func->oper(expr->func, stack + stack_size));
-            printf("    result %f stored to %p, has type %08x\n", stack[stack_size], stack+stack_size, type);
+            printf("    result "); print_object(type, stack+stack_size);
+            printf(" stored to %p, has type %08x\n", stack+stack_size, type);
+            if (type & TYPE_POINT) expr->flags |= EXPRESSION_PLOTTABLE | EXPRESSION_FIXED;
+            expr->value_type = type;
+            expr->value = stack+stack_size;
             expr->var->type = type;
             stack_size += (type>>8);
         }

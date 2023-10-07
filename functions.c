@@ -79,7 +79,7 @@ double fdiv(double n, double d) {
 
 double mmod(double n, double d) {
     double i = fmod(n, d);
-    if ((n>0) ^ (d>0)) i += d;
+    if (n && ((n>0) ^ (d>0))) i += d;
     return i;
 }
 
@@ -239,7 +239,6 @@ uint32_t func_user_defined(void *f, double *stackpos) {
             varnum++;
             st += len;
         }
-        printf("argument has type %08x\n", type);
         arg = arg->next_arg;
     } while (arg);
     type = target->oper(target, stackpos+st);
@@ -352,7 +351,7 @@ uint32_t func_index(void *f, double *stackpos) {
         }
         return (lr << 8) | (t1 & 0xff);
     } else if ((t2 & TYPE_MASK) == TYPE_DOUBLE) {
-        int32_t v2 = step*(val1[0]-1);
+        int32_t v2 = step*(val2[0]-1);
         for (uint8_t j=0; j < step; j++) stackpos[j] = (((v2 >= l1) || (v2 < 0)) ? NAN : val1[v2+j]);
         return (step << 8) | (t2 & 0xff & ~TYPE_LIST);
     } else FAIL("ERROR: invalid indexing operation: type %08x indexes type %08x\n", t2, t1);
@@ -392,14 +391,14 @@ uint32_t func_point(void *f, double *stackpos) {
             stackpos[2*i] = stackpos[i]*SIGN_BIT(fs);
             stackpos[2*i+1] = v2;
         }
-        return (l1<<9) | TYPE_POINT;
+        return (l1<<9) | TYPE_POINT | TYPE_LIST;
     } else if (!(t1 & TYPE_LIST) && (t2 & TYPE_LIST)) {
         double v1 = *val1;
         for (int i=l2-1; i >= 0; i--) {
             stackpos[2*i] = v1;
             stackpos[2*i+1] = stackpos[i+1]*SIGN_BIT(fs);
         }
-        return (l2<<9) | TYPE_POINT;
+        return (l2<<9) | TYPE_POINT | TYPE_LIST;
     } else if (l1 > l2) {
         for (int i=0; i < l2; i++) stackpos[l1+l2+i] = stackpos[i];
         val1 = stackpos+l1+l2;
@@ -407,7 +406,7 @@ uint32_t func_point(void *f, double *stackpos) {
             stackpos[2*i] = val1[i]*SIGN_BIT(fs);
             stackpos[2*i+1] = val2[i]*SIGN_BIT(fs);
         }
-        return (l2<<9) | TYPE_POINT;
+        return (l2<<9) | TYPE_POINT | TYPE_LIST;
     } else {
         // Copy l1, which may be shorter, onto the end of the stack
         for (int i=0; i < l1; i++) stackpos[l1+l2+i] = stackpos[i];
@@ -416,7 +415,7 @@ uint32_t func_point(void *f, double *stackpos) {
             stackpos[2*i] = val1[i]*SIGN_BIT(fs);
             stackpos[2*i+1] = val2[i]*SIGN_BIT(fs);
         }
-        return (l1<<9) | TYPE_POINT;
+        return (l1<<9) | TYPE_POINT | TYPE_LIST;
     }
     
 }
@@ -518,4 +517,45 @@ uint32_t func_for(void *f, double *stackpos) {
 uint32_t func_equals(void *f, double *stackpos) {
     return TYPE_BOOLEAN;
 }
+
+uint32_t func_extract_x(void *f, double *stackpos) {
+    function *fs = (function*)f;
+    function *arg = fs->first_arg;
+    
+    uint32_t argtype, arglen;
+    if (arg->oper) {
+        argtype = arg->oper(arg, stackpos);
+        arglen = argtype>>8;
+    } else {
+        argtype = ((arg->value_type)&0x40 ? ((variable*)(arg->value))->type : arg->value_type);
+        arglen = argtype>>8;
+        for (int j=0; j < arglen; j++) stackpos[j] = VALUE_LIST(arg, j);
+    }
+    if (!((argtype & TYPE_MASK) == TYPE_POINT)) FAIL("ERROR: cannot access x-coordinate of type %08x\n", argtype);
+    for (int i=0; i < arglen; i += 2) {
+        stackpos[i>>1] = stackpos[i];
+    }
+    return ((argtype>>1) & 0xffffff00) | (argtype&0xff);
+}
+
+uint32_t func_extract_y(void *f, double *stackpos) {
+    function *fs = (function*)f;
+    function *arg = fs->first_arg;
+    
+    uint32_t argtype, arglen;
+    if (arg->oper) {
+        argtype = arg->oper(arg, stackpos);
+        arglen = argtype>>8;
+    } else {
+        argtype = ((arg->value_type)&0x40 ? ((variable*)(arg->value))->type : arg->value_type);
+        arglen = argtype>>8;
+        for (int j=0; j < arglen; j++) stackpos[j] = VALUE_LIST(arg, j);
+    }
+    if (!((argtype & TYPE_MASK) == TYPE_POINT)) FAIL("ERROR: cannot access y-coordinate of type %08x\n", argtype);
+    for (int i=0; i < arglen; i += 2) {
+        stackpos[i>>1] = stackpos[i+1];
+    }
+    return ((argtype>>1) & 0xffffff00) | (argtype&0xff);
+}
+
 
