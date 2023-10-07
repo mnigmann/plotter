@@ -77,8 +77,22 @@ double fdiv(double n, double d) {
     return n/d;
 }
 
+double mmod(double n, double d) {
+    double i = fmod(n, d);
+    if ((n>0) ^ (d>0)) i += d;
+    return i;
+}
+
 uint32_t func_div(void *f, double *stackpos) {
     return func_general_two_args(f, stackpos, fdiv);
+}
+
+uint32_t func_mod(void *f, double *stackpos) {
+    return func_general_two_args(f, stackpos, mmod);
+}
+
+uint32_t func_floor(void *f, double *stackpos) {
+    return func_general_one_arg(f, stackpos, floor);
 }
 
 uint32_t func_sine(void *f, double *stackpos) {
@@ -213,6 +227,7 @@ uint32_t func_user_defined(void *f, double *stackpos) {
         if (arg->oper) {
             type = arg->oper(arg, stackpos+st);
             target_arg[varnum].pointer = stackpos+st;
+            target_arg[varnum].type = type;
             varnum++;
             st += (type>>8);
         } else {
@@ -224,6 +239,7 @@ uint32_t func_user_defined(void *f, double *stackpos) {
             varnum++;
             st += len;
         }
+        printf("argument has type %08x\n", type);
         arg = arg->next_arg;
     } while (arg);
     type = target->oper(target, stackpos+st);
@@ -240,22 +256,41 @@ uint32_t func_list(void *f, double *stackpos) {
     uint32_t argtype;
     uint32_t arglen;
     uint32_t st=0;
+    uint8_t ellipsis = 0;
     do {
         if (arg->oper) {
             argtype = arg->oper(arg, stackpos+st);
-            if (argtype & TYPE_LIST) FAIL("ERROR: Cannot store a list inside a list\n");
-            if ((type != 0xff) && ((argtype&0xff) != type)) FAIL("ERROR: All list elements must have the same type\n");
-            type = argtype & 0xff;
-            st += argtype>>8;
+            if ((argtype == TYPE_ELLIPSIS) && ((type & TYPE_MASK) == TYPE_DOUBLE) && (arg->next_arg)) {
+                ellipsis = 2;
+            } else {
+                if (argtype & TYPE_LIST) FAIL("ERROR: Cannot store a list inside a list\n");
+                if ((type != 0xff) && ((argtype&0xff) != type)) FAIL("ERROR: All list elements must have the same type\n");
+                st += argtype>>8;
+                type = argtype & 0xff;
+            }
         } else {
             argtype = ((arg->value_type)&0x40 ? ((variable*)(arg->value))->type : arg->value_type);
-            //printf("First argument: %08x, %f\n", argtype, VALUE(arg));
             if (argtype & TYPE_LIST) FAIL("ERROR: Cannot store a list inside a list\n");
             if ((type != 0xff) && ((argtype&0xff) != type)) FAIL("ERROR: All list elements must have the same type\n");
             type = argtype & 0xff;
             arglen = argtype>>8;
             for (int i=0; i < arglen; i++) stackpos[st+i] = VALUE_LIST(arg, i);
             st += arglen;
+        }
+        if (ellipsis == 2) ellipsis--;
+        else if (ellipsis) {
+            ellipsis = 0;
+            if (stackpos[st-1] != stackpos[st-2]) {
+                double end = stackpos[st-1];
+                double step = (st > 2 ? stackpos[st-2]-stackpos[st-3] : (stackpos[st-2] > end ? -1 : 1));
+                if (step && ((step > 0) ^ (stackpos[st-1] < stackpos[st-2]))) {
+                    st--;
+                    for (double val=stackpos[st-1]; val < end; st++) {
+                        val += step;
+                        stackpos[st] = val;
+                    }
+                }
+            }
         }
         arg = arg->next_arg;
     } while (arg);
@@ -366,7 +401,7 @@ uint32_t func_point(void *f, double *stackpos) {
         }
         return (l2<<9) | TYPE_POINT;
     } else if (l1 > l2) {
-        memcpy(stackpos+l1+l2, stackpos, l2);
+        for (int i=0; i < l2; i++) stackpos[l1+l2+i] = stackpos[i];
         val1 = stackpos+l1+l2;
         for (int i=0; i < l2; i++) {
             stackpos[2*i] = val1[i]*SIGN_BIT(fs);
@@ -374,7 +409,8 @@ uint32_t func_point(void *f, double *stackpos) {
         }
         return (l2<<9) | TYPE_POINT;
     } else {
-        memcpy(stackpos+l1+l2, stackpos, l1);
+        // Copy l1, which may be shorter, onto the end of the stack
+        for (int i=0; i < l1; i++) stackpos[l1+l2+i] = stackpos[i];
         val1 = stackpos+l1+l2;
         for (int i=0; i < l1; i++) {
             stackpos[2*i] = val1[i]*SIGN_BIT(fs);
@@ -383,5 +419,103 @@ uint32_t func_point(void *f, double *stackpos) {
         return (l1<<9) | TYPE_POINT;
     }
     
+}
+
+uint32_t func_ellipsis(void *f, double *stackpos) {
+    return TYPE_ELLIPSIS;
+}
+
+uint32_t func_for(void *f, double *stackpos) {
+    /* For loops may have several variables. To evaluate a for loop, the following steps must take place
+     *  * Determine the number of variables
+     *  * Allocate space at the beginning of the stack for ending addresses for each list
+     *  * Evaluate all of the lists to be iterated over and store them on the stack
+     *  * Iterate until all of the pointers are at their ends
+     *  * Copy the result into position.
+     * 
+     */
+    function *fs = (function*)f;
+    function *arg1 = fs->first_arg;
+    function *arg = arg1->next_arg;
+    uint8_t type = 0xff;
+    uint32_t argtype;
+    uint32_t arglen;
+    uint8_t ellipsis = 0;
+    uint8_t n_args = 0;
+    while (arg) {
+        n_args++;
+        arg = arg->next_arg;
+    }
+    uint32_t st=2*n_args;
+    uint32_t *types;
+    variable *first_var = NULL;
+
+    arg = arg1->next_arg;
+    function *var_value;
+    int i = 0;
+    uint32_t total = 1;
+    do {
+        if (first_var == NULL) first_var = arg->first_arg->value;
+        var_value = arg->first_arg->next_arg;
+        if (var_value->oper) {
+            argtype = var_value->oper(var_value, stackpos+st);
+        } else {
+            argtype = ((var_value->value_type)&0x40 ? ((variable*)(var_value->value))->type : var_value->value_type);
+            arglen = argtype>>8;
+            for (int j=0; j < arglen; j++) stackpos[st+j] = VALUE_LIST(var_value, j);
+        }
+        first_var[i].pointer = stackpos+st;
+        types = (uint32_t*)(stackpos+2*i);
+        *types = argtype>>8;
+        types = (uint32_t*)(stackpos+2*i+1);
+        *types = 1;
+        if (argtype & TYPE_POINT) *types = 2;
+        first_var[i].type = ((*types)<<8) | (argtype & 0xff & ~TYPE_LIST);
+        st += (argtype>>8);
+        if (argtype & TYPE_POINT) total *= (argtype >> 9);
+        else total *= (argtype >> 8);
+        arg = arg->next_arg;
+        i++;
+    } while (arg);
+
+    if ((arg1->oper == NULL) && !(arg1->value_type & 0x40)) {
+        st = 0;
+        double *val = arg1->value;
+        if (arg1->value_type & TYPE_POINT) {
+            for (i=0; i < total; i++) {
+                stackpos[2*i] = val[0];
+                stackpos[2*i+1] = val[1];
+            }
+            return (total<<9) | (arg1->value_type & TYPE_MASK) | TYPE_LIST;
+        }
+        for (i=0; i < total; i++) {
+            stackpos[i] = val[0];
+        }
+        return (total<<8) | TYPE_LIST;
+    }
+    
+    int input_len = st;
+    for (i=0; i < total; i++) {
+        argtype = arg1->oper(arg1, stackpos+st);
+        st += (argtype>>8);
+        double *pos = stackpos + n_args*2;
+        for (int j=0; j < n_args; j++) {
+            // Step the pointer
+            types = (uint32_t*)(stackpos+2*j+1);
+            first_var[j].pointer+=*types;
+            // Determine the end of the variable's list
+            types = (uint32_t*)(stackpos+2*j);
+            pos += *types;
+            if (first_var[j].pointer >= pos) first_var[j].pointer -= *types;
+            else break;
+        }
+    }
+    for (i=input_len; i < st; i++) stackpos[i-input_len] = stackpos[i];
+    
+    return ((st - input_len)<<8) | (0xff&argtype) | TYPE_LIST;
+}
+
+uint32_t func_equals(void *f, double *stackpos) {
+    return TYPE_BOOLEAN;
 }
 

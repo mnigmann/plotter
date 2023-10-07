@@ -9,11 +9,13 @@
 #define VARIABLE_SPECIAL 0x08
 #define VARIABLE_XLIKE 0x10
 #define VARIABLE_YLIKE 0x20
+#define VARIABLE_XYLIKE 0x30
 
 #define EXPRESSION_PLOTTABLE 0x01
 #define EXPRESSION_FIXED 0x02
 
 #define PARSE_COMMA 0x01
+#define PARSE_NEWVAR 0x02
 
 /*
  * Data structures used for this program
@@ -58,8 +60,10 @@ function new_function(uint32_t (*oper)(void*, double*), function *next_arg, func
 function new_value(void *value, uint32_t value_type, function *next_arg);
 variable new_variable(char *name, int type, uint8_t flags, double *pointer);
 
-int parse_latex_rec(char *latex, int end, function *function_list, double *stack, variable *variable_list, int *stack_size, uint8_t *flags);
-void parse_latex(char *latex, function *function_list, double *stack, variable *variable_list, int *stack_size);
-int parse_file(function *function_list, double *stack, variable *variable_list, char *stringbuf, expression *expression_list, uint32_t *n_func, uint32_t *n_var, uint32_t *n_expr);
+void print_object(uint32_t type, double *pos);
+
+int parse_latex_rec(char *latex, int end, function *function_list, double *stack, variable *variable_list, char *stringbuf, int *stack_size, int *var_size, int *string_size, uint8_t *flags);
+void parse_latex(char *latex, function *function_list, double *stack, variable *variable_list, char *stringbuf, int *stack_size, int *var_size, int *string_size);
+int parse_file(char *fname, function *function_list, double *stack, variable *variable_list, char *stringbuf, expression *expression_list, uint32_t *n_func, uint32_t *n_var, uint32_t *n_expr);
 
 #endif

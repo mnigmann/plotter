@@ -16,6 +16,7 @@
 
 #define PI 3.14159265359
 #define SCROLL_AMOUNT 1.1
+#define TICK_SIZE 125
 
 #define SCALE_X(v) ((uint16_t)(250*(1+v)))
 #define SCALE_Y(v) ((uint16_t)(250*(1-v)))
@@ -33,15 +34,15 @@
 
 guchar data[3*WIDTH*HEIGHT];
 GdkPixbuf *pixbuf;
-double window_x0 = 0.0;
-double window_y0 = 0.0;
+double window_x0 = -10;
+double window_y0 = -10;
 double window_x1 = 10;
 double window_y1 = 10;
 double xscale;
 double yscale;
 uint16_t nfev = 0;
 
-function function_list[100];
+function function_list[200];
 variable variable_list[30];
 expression expression_list[100];
 double stack[2000];
@@ -201,7 +202,7 @@ void draw_function_slow(function *func, double *stackpos, uint8_t *color) {
     double minstep_x = (window_x1 - window_x0)/WIDTH;
     for (double t = window_x0+minstep_x; t < window_x1; t+=minstep_x) {
         eval_func(t, &x, &y, func, stackpos);
-        LineAA((uint8_t*)data, WIDTH, HEIGHT, SCALE_XK(xp), SCALE_YK(yp), SCALE_XK(x), SCALE_YK(y), color);
+        if ((x+1 > x) && (y+1 > y) && (xp+1 > xp) && (yp+1 > yp)) LineAA((uint8_t*)data, WIDTH, HEIGHT, SCALE_XK(xp), SCALE_YK(yp), SCALE_XK(x), SCALE_YK(y), color);
         xp = x; yp = y;
     }
 }
@@ -224,15 +225,56 @@ static gboolean button_release_callback (GtkWidget *event_box, GdkEventButton *e
 void redraw_all(gpointer data_pointer) {
     xscale = (1<<16)*1.0*WIDTH/(window_x1 - window_x0);
     yscale = (1<<16)*1.0*HEIGHT/(window_y1 - window_y0);
-    clock_t t3, t4;
     t1 = clock();
     memset(data, 0, 3*WIDTH*HEIGHT);
+    
+    int16_t logx = round(3*log10((TICK_SIZE<<16) / xscale));
+    int8_t basex = logx%3;
+    basex = (basex<0 ? 3+basex : basex);
+    int16_t decadex = (logx - basex)/3;
+    basex++;
+    if (basex == 3) basex = 5;
+    clock_t t3, t4;
+    double ticksize = basex;
+    int64_t xk;
+    while (decadex > 0) {decadex--; ticksize *= 10;}
+    while (decadex < 0) {decadex++; ticksize /= 10;}
+    double x0_scaled = ticksize*((int64_t)(window_x0/ticksize));
+    double x1_scaled = ticksize*((int64_t)(window_x1/ticksize));
+    for (double tick=x0_scaled; tick <= x1_scaled; tick+=ticksize) {
+        xk = SCALE_XK(tick) / (1<<16);
+        for (uint32_t i=3*xk; i < 3*WIDTH*HEIGHT; i+=3*WIDTH) {
+            data[i] = 64;
+            data[i+1] = 64;
+            data[i+2] = 64;
+        }
+    }
     if ((window_x0 <= 0) && (0 < window_x1)) {
-        int64_t xk = SCALE_XK(0) / (1<<16);
+        xk = SCALE_XK(0) / (1<<16);
         for (uint32_t i=3*xk; i < 3*WIDTH*HEIGHT; i+=3*WIDTH) {
             data[i] = 128;
             data[i+1] = 128;
             data[i+2] = 128;
+        }
+    }
+    
+    int16_t logy = round(3*log10((TICK_SIZE<<16) / yscale));
+    int8_t basey = logy%3;
+    basey = (basey<0 ? 3+basey : basey);
+    int16_t decadey = (logy - basey)/3;
+    basey++;
+    if (basey == 3) basey = 5;
+    ticksize = basey;
+    while (decadey > 0) {decadey--; ticksize *= 10;}
+    while (decadey < 0) {decadey++; ticksize /= 10;}
+    double y0_scaled = ticksize*((int64_t)(window_y0/ticksize));
+    double y1_scaled = ticksize*((int64_t)(window_y1/ticksize));
+    for (double tick=y0_scaled; tick <= y1_scaled; tick+=ticksize) {
+        xk = SCALE_YK(tick) / (1<<16);
+        if ((xk >= HEIGHT) || (xk < 0)) continue;
+        xk = 3*WIDTH*xk;
+        for (uint32_t i=0; i < 3*WIDTH; i++) {
+            data[xk + i] = 64;
         }
     }
     if ((window_y0 < 0) && (0 <= window_y1)) {
@@ -256,7 +298,6 @@ void redraw_all(gpointer data_pointer) {
                     pt_y0 = (SCALE_YK(ptr[p+1])>>16)-10;
                     pt_y1 = CLIP_HEIGHT(pt_y0 + 20);
                     pt_y0 = CLIP_HEIGHT(pt_y0);
-                    g_print("point at (%f, %f), bounds %lld, %lld, %lld, %lld\n", ptr[p], ptr[p+1], pt_x0, pt_x1, pt_y0, pt_y1);
                     if (pt_x0 == pt_x1) continue;
                     for (int j=pt_y0; j < pt_y1; j++) {
                         for (int k=pt_x0; k < pt_x1; k++) memcpy(data + TOIDX(k, j), expression_list[i].color, 3);
@@ -273,7 +314,7 @@ void redraw_all(gpointer data_pointer) {
         gtk_image_set_from_pixbuf(data_pointer, pixbuf);
     }
     t2 = clock();
-    g_print("Redraw took %luus, evaluation %luus, %d expressions\n", t2-t1, t4-t3, n_expr);
+    g_print("Redraw took %luus, evaluation %luus, %d expressions, bounds %f %f %f %f\n", t2-t1, t4-t3, n_expr, window_x0, window_y0, window_x1, window_y1);
 }
 
 static gboolean scroll_callback (GtkWidget *event_box, GdkEventScroll *event, gpointer data_pointer) {
@@ -334,27 +375,6 @@ static gboolean motion_callback(GtkWidget *event_box, GdkEventMotion *event, gpo
     *y = 2*sin(cos(7*t) + cos(t));
 }*/
 
-void print_object(uint32_t type, double *pos) {
-    if (type & TYPE_LIST) printf("[");
-    uint32_t len = type >> 8;
-    if ((type & TYPE_MASK) == TYPE_POINT) {
-        for (int i=0; i < len; i += 2) {
-            if (i+2 < len) printf("(%f, %f), ", pos[i], pos[i+1]);
-            else printf("(%f, %f)", pos[i], pos[i+1]);
-        }
-    } else if ((type & TYPE_MASK) == TYPE_COLOR) {
-        for (int i=0; i < len; i += 3) {
-            if (i+2 < len) printf("rgb(%f, %f, %f), ", pos[i], pos[i+1], pos[i+2]);
-            else printf("rgb(%f, %f, %f)", pos[i], pos[i+1], pos[i+2]);
-        }
-    } else {
-        for (int i=0; i < len; i++) {
-            if (i+1 < len) printf("%f, ", pos[i]);
-            else printf("%f", pos[i]);
-        }
-    }
-    if (type & TYPE_LIST) printf("]");
-}
 
 static void activate (GtkApplication *app, gpointer user_data) {
     GtkWidget *window;
@@ -396,7 +416,7 @@ int main (int argc, char **argv) {
     
     uint32_t n_func = 0;
     uint32_t n_var = 0;
-    parse_file(function_list, stack, variable_list, stringbuf, expression_list, &n_func, &n_var, &n_expr);
+    parse_file(argv[1], function_list, stack, variable_list, stringbuf, expression_list, &n_func, &n_var, &n_expr);
     printf("Parsing completed. %d function blocks, %d variables, %d expressions\n", n_func, n_var, n_expr);
 
     for (int i=0; i < n_expr; i++) {
@@ -409,7 +429,7 @@ int main (int argc, char **argv) {
     }
 
     uint32_t type;
-    t1 = clock();
+    /*t1 = clock();
     for (int i=0; i < 1; i++) 
         type = expression_list[5].func->oper(expression_list[5].func, stack+60);
     t2 = clock();
@@ -421,13 +441,13 @@ int main (int argc, char **argv) {
     type = expression_list[6].func->oper(expression_list[6].func, stack+60);
     printf("result is ");
     print_object(type, stack+60);
-    printf("\n");
+    printf("\n");*/
 
-    stack[60] = 37;
+    stack[60] = 1;
     variable_list[0].pointer = stack+60;
     variable_list[0].type = 1<<8;
     printf("result is ");
-    print_object(expression_list[7].func->oper(expression_list[7].func, stack+61), stack+61);
+    print_object(expression_list[10].func->oper(expression_list[10].func, stack+61), stack+61);
     printf(", expression flags %02x, value type %08x\n", expression_list[7].flags, expression_list[7].value_type);
 
     //return 0;
@@ -482,7 +502,8 @@ int main (int argc, char **argv) {
 
     app = gtk_application_new("org.gtk.example", G_APPLICATION_FLAGS_NONE);
     g_signal_connect(app, "activate", G_CALLBACK (activate), NULL);
-    status = g_application_run(G_APPLICATION (app), argc, argv);
+    for (int i=2; i < argc; i++) argv[i-1] = argv[i];
+    status = g_application_run(G_APPLICATION (app), argc-1, argv);
     g_object_unref (app);
 
     return status;
