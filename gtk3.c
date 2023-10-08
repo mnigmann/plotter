@@ -6,22 +6,7 @@
 #include "parse.h"
 #include "functions.h"
 #include "lines.h"
-
-#define WIDTH 500
-#define HEIGHT 500
-#define COLOR_AXES 64
-#define COLOR_MAJOR_GRID 160
-#define COLOR_MINOR_GRID 200
-
-#define POINT_SIZE 3
-
-#define DT_DERIV 1e-4
-#define RADIUS_SCALE 1
-#define MAX_ARC_LENGTH 0.1
-
-#define PI 3.14159265359
-#define SCROLL_AMOUNT 1.1
-#define TICK_SIZE 125
+#include "config.h"
 
 #define SCALE_X(v) ((uint16_t)(250*(1+v)))
 #define SCALE_Y(v) ((uint16_t)(250*(1-v)))
@@ -39,10 +24,10 @@
 
 guchar data[3*WIDTH*HEIGHT];
 GdkPixbuf *pixbuf;
-double window_x0 = -10;
-double window_y0 = -10;
-double window_x1 = 10;
-double window_y1 = 10;
+double window_x0 = -3;
+double window_y0 = -3;
+double window_x1 = 3;
+double window_y1 = 3;
 double xscale;
 double yscale;
 uint16_t nfev = 0;
@@ -50,7 +35,7 @@ uint16_t nfev = 0;
 function function_list[500];
 variable variable_list[30];
 expression expression_list[100];
-double stack[10000];
+double stack[65536];
 char stringbuf[500];
 
 uint32_t n_expr;
@@ -293,7 +278,7 @@ void redraw_all(gpointer data_pointer) {
     int64_t pt_x0, pt_x1, pt_y0, pt_y1;
     for (int i=0; i < n_expr; i++) {
         if (expression_list[i].flags & EXPRESSION_PLOTTABLE) {
-            if ((expression_list[i].flags & EXPRESSION_FIXED) && (expression_list[i].value_type & TYPE_POINT)) {
+            if ((expression_list[i].flags & EXPRESSION_FIXED) && ((expression_list[i].value_type & TYPE_MASK) == TYPE_POINT)) {
                 int len = (expression_list[i].value_type) >> 8;
                 double *ptr = expression_list[i].value;
                 for (int p=0; p < len; p+=2) {
@@ -306,6 +291,20 @@ void redraw_all(gpointer data_pointer) {
                     if (pt_x0 == pt_x1) continue;
                     for (int j=pt_y0; j < pt_y1; j++) {
                         for (int k=pt_x0; k < pt_x1; k++) memcpy(data + TOIDX(k, j), expression_list[i].color, 3);
+                    }
+                }
+            } else if ((expression_list[i].flags & EXPRESSION_FIXED) && ((expression_list[i].value_type & TYPE_MASK) == TYPE_POLYGON)) {
+                int len = (expression_list[i].value_type) >> 8;
+                double *ptr = expression_list[i].value;
+                for (int p=0; p < len; p += 2*MAX_POLYGON_SIZE) {
+                    pt_x0 = SCALE_XK(ptr[p+2*MAX_POLYGON_SIZE-2]);
+                    pt_y0 = SCALE_YK(ptr[p+2*MAX_POLYGON_SIZE-1]);
+                    for (int k=0; k < MAX_POLYGON_SIZE; k++) {
+                        pt_x1 = SCALE_XK(ptr[p+2*k]);
+                        pt_y1 = SCALE_YK(ptr[p+2*k+1]);
+                        LineAA((uint8_t*)data, WIDTH, HEIGHT, pt_x0, pt_y0, pt_x1, pt_y1, expression_list[i].color);
+                        pt_x0 = pt_x1;
+                        pt_y0 = pt_y1;
                     }
                 }
             } else {
@@ -362,6 +361,19 @@ static gboolean motion_callback(GtkWidget *event_box, GdkEventMotion *event, gpo
     return TRUE;
 }
 
+static gboolean timeout_callback(gpointer data_pointer) {
+    // variable 5 is alpha, expression 3 is alpha definition
+    printf("timeout_callback\n");
+    *variable_list[5].pointer = *variable_list[5].pointer + 0.1;
+    int stack_size;
+    printf("variable set to %f\n", *variable_list[5].pointer);
+    clock_t t3 = clock();
+    evaluate_from(expression_list, n_expr, expression_list+3, stack, &stack_size);
+    clock_t t4 = clock();
+    printf("evaluation took %luus\n", t4-t3);
+    redraw_all(data_pointer);
+    return TRUE;
+}
 
 /*void eval_func(double t, double *x, double *y) {
     double e = exp(t);
@@ -397,6 +409,7 @@ static void activate (GtkApplication *app, gpointer user_data) {
 
     pixbuf = gdk_pixbuf_new_from_data(data, 0, 0, 8, WIDTH, HEIGHT, 3*WIDTH, NULL, NULL);
     image = gtk_image_new_from_pixbuf(pixbuf);
+    g_timeout_add(100, timeout_callback, image);
     g_signal_connect(G_OBJECT(event_box), "button_press_event", G_CALLBACK(button_press_callback), image);
     g_signal_connect(G_OBJECT(event_box), "button_release_event", G_CALLBACK(button_release_callback), image);
     g_signal_connect(G_OBJECT(event_box), "scroll_event", G_CALLBACK(scroll_callback), image);
@@ -474,6 +487,7 @@ int main (int argc, char **argv) {
     GtkApplication *app;
     int status;
     redraw_all(NULL);
+
 
     /*t = t + dt;
     draw_line(SCALE_X(xpp), SCALE_Y(ypp), SCALE_X(xp), SCALE_Y(yp));

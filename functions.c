@@ -1,5 +1,6 @@
 #include "functions.h"
 #include "parse.h"
+#include "config.h"
 #include <stdint.h>
 #include <math.h>
 #include <stdio.h>
@@ -43,6 +44,7 @@ uint32_t func_general_two_args(void *f, double *stackpos, double (*oper)(double,
         t1 = ((arg->value_type)&0x40 ? ((variable*)(arg->value))->type : arg->value_type);
         val1 = ((arg->value_type)&0x40 ? ((variable*)(arg->value))->pointer : (double*)(arg->value));
     }
+    l1 = t1>>8;
     arg = arg->next_arg;
     if (arg->oper) {
         val2 = stackpos+(l1?l1:1);
@@ -51,7 +53,6 @@ uint32_t func_general_two_args(void *f, double *stackpos, double (*oper)(double,
         t2 = ((arg->value_type)&0x40 ? ((variable*)(arg->value))->type : arg->value_type);
         val2 = ((arg->value_type)&0x40 ? ((variable*)(arg->value))->pointer : (double*)(arg->value));
     }
-    l1 = t1>>8;
     l2 = t2>>8;
     if (!(t1 & TYPE_LIST) && !(t2 & TYPE_LIST)) {
         stackpos[0] = oper(*val1, *val2)*SIGN_BIT(fs);
@@ -71,6 +72,15 @@ uint32_t func_general_two_args(void *f, double *stackpos, double (*oper)(double,
         for (int i=0; i < l1; i++) stackpos[i] = oper(val1[i], val2[i])*SIGN_BIT(fs);
         return t1;
     }
+}
+
+uint32_t func_value(void *f, double *stackpos) {
+    function *fs = (function*)f; 
+    uint32_t type = ((fs->value_type)&0x40 ? ((variable*)(fs->value))->type : fs->value_type);
+    double *ptr = ((fs->value_type)&0x40 ? ((variable*)(fs->value))->pointer : (double*)(fs->value));
+    uint32_t len = type>>8;
+    for (int i=0; i < len; i++) stackpos[i] = ptr[i]*SIGN_BIT(fs);
+    return type;
 }
 
 double fdiv(double n, double d) {
@@ -156,6 +166,8 @@ uint32_t func_add(void *f, double *stackpos) {
     if (!(result_type & TYPE_LIST)) {
         stackpos[0] = sum*SIGN_BIT(fs);
         result_length = 1;
+    } else {
+        for (i=0; i < result_length; i++) stackpos[i] *= SIGN_BIT(fs);
     }
     return (result_length<<8) | result_type;
 }
@@ -205,6 +217,8 @@ uint32_t func_multiply(void *f, double *stackpos) {
     if (!(result_type & TYPE_LIST)) {
         stackpos[0] = prod*SIGN_BIT(fs);
         result_length = 1;
+    } else {
+        for (i=0; i < result_length; i++) stackpos[i] *= SIGN_BIT(fs);
     }
     return (result_length<<8) | result_type;
 }
@@ -223,7 +237,9 @@ uint32_t func_user_defined(void *f, double *stackpos) {
     uint32_t st = 0;
     uint32_t type, len;
     uint32_t varnum = 0;
+    //printf("user_defined, target %p, target arg %p\n", target, target_arg);
     do {
+        //printf("argument points to function block %p, value_type %08x, value %p\n", arg, arg->value_type, arg->value);
         if (arg->oper) {
             type = arg->oper(arg, stackpos+st);
             target_arg[varnum].pointer = stackpos+st;
@@ -239,9 +255,11 @@ uint32_t func_user_defined(void *f, double *stackpos) {
             varnum++;
             st += len;
         }
+        //printf("argument is %08x\n", type);
         arg = arg->next_arg;
     } while (arg);
     type = target->oper(target, stackpos+st);
+    //printf("return type is %08x\n", type);
     len = type>>8;
     // Shrink the stack by removing unused values
     for (int i=0; i < len; i++) stackpos[i] = stackpos[st+i]*SIGN_BIT(fs);
@@ -420,6 +438,51 @@ uint32_t func_point(void *f, double *stackpos) {
     
 }
 
+uint32_t func_polygon(void *f, double *stackpos) {
+    function *fs = (function*)f;
+    function *arg = fs->first_arg;
+    
+    int n_args = 0;
+    uint32_t arglen, argtype;
+    while (arg) {
+        n_args++;
+        arg = arg->next_arg;
+    }
+    arg = fs->first_arg;
+
+    if (n_args == 1) {
+        argtype = arg->oper(arg, stackpos);
+        arglen = argtype >> 8;
+        if (arglen > MAX_POLYGON_SIZE) FAIL("ERROR: polygon has too many points\n");
+        return (arglen<<8) | TYPE_POLYGON;
+    }
+    
+    if (n_args > MAX_POLYGON_SIZE) FAIL("ERROR: polygon has too many points\n");
+    uint32_t first_len=0, st=0, min_len=0;
+    while (arg) {
+        argtype = arg->oper(arg, stackpos+st);
+        if ((argtype & TYPE_MASK) != TYPE_POINT) FAIL("ERROR: polygon arguments must be points");
+        arglen = argtype>>8;
+        if (first_len == 0) {
+            first_len = arglen;
+            min_len = arglen;
+        } else if (arglen < min_len) min_len = arglen;
+        st += first_len;
+        arg = arg->next_arg;
+    }
+    // Lazy, slow solution
+    double *temp = malloc(first_len*MAX_POLYGON_SIZE*sizeof(double));
+    memcpy(temp, stackpos, first_len*MAX_POLYGON_SIZE*sizeof(double));
+    for (int i=0; i < (first_len>>1); i++) {
+        for (int j=0; j < MAX_POLYGON_SIZE; j++) {
+            stackpos[i*2*MAX_POLYGON_SIZE + 2*j] = temp[j*first_len + 2*i];
+            stackpos[i*2*MAX_POLYGON_SIZE + 2*j + 1] = temp[j*first_len + 2*i + 1];
+        }
+    }
+    free(temp);
+    return ((min_len*MAX_POLYGON_SIZE)<<8) | TYPE_LIST | TYPE_POLYGON;
+}
+
 uint32_t func_ellipsis(void *f, double *stackpos) {
     return TYPE_ELLIPSIS;
 }
@@ -521,6 +584,7 @@ uint32_t func_equals(void *f, double *stackpos) {
 uint32_t func_extract_x(void *f, double *stackpos) {
     function *fs = (function*)f;
     function *arg = fs->first_arg;
+    //printf("extracting x, arg %p, oper %p (%p), value %p, value_type %08x\n", arg, arg->oper, (func_value), arg->value, arg->value_type);
     
     uint32_t argtype, arglen;
     if (arg->oper) {
@@ -531,11 +595,12 @@ uint32_t func_extract_x(void *f, double *stackpos) {
         arglen = argtype>>8;
         for (int j=0; j < arglen; j++) stackpos[j] = VALUE_LIST(arg, j);
     }
+    //printf("extracting from type %08x\n", argtype);
     if (!((argtype & TYPE_MASK) == TYPE_POINT)) FAIL("ERROR: cannot access x-coordinate of type %08x\n", argtype);
     for (int i=0; i < arglen; i += 2) {
         stackpos[i>>1] = stackpos[i];
     }
-    return ((argtype>>1) & 0xffffff00) | (argtype&0xff);
+    return ((argtype>>1) & 0xffffff00) | ((argtype&0xff) & ~TYPE_MASK);
 }
 
 uint32_t func_extract_y(void *f, double *stackpos) {
@@ -555,7 +620,7 @@ uint32_t func_extract_y(void *f, double *stackpos) {
     for (int i=0; i < arglen; i += 2) {
         stackpos[i>>1] = stackpos[i+1];
     }
-    return ((argtype>>1) & 0xffffff00) | (argtype&0xff);
+    return ((argtype>>1) & 0xffffff00) | ((argtype&0xff) & ~TYPE_MASK);
 }
 
 

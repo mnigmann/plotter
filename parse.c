@@ -82,7 +82,7 @@ function new_function(uint32_t (*oper)(void*, double*), function *next_arg, func
 
 function new_value(void *value, uint32_t value_type, function *next_arg) {
     function block;
-    block.oper = NULL;
+    block.oper = func_value;
     block.value = value;
     block.value_type = value_type;
     block.next_arg = next_arg;
@@ -109,6 +109,8 @@ expression new_expression(variable *var, function *func, expression **dependenci
     expr.flags = 0;
     expr.expr_begin = expr_begin;
     expr.next_expr = NULL;
+    expr.value = NULL;
+    expr.value_type = 0;
     return expr;
 }
 
@@ -219,6 +221,54 @@ int get_next_match(char *latex, int start, int end, char target) {
     return -1;
 }
 
+void evaluate_from(expression *expression_list, int n_expr, expression *top_expr, double *stack, int *stack_size_ptr) {
+    // Print the expression table
+    for (int i=0; i < n_expr; i++)
+        printf("expression pointer at %p, function %p, variable %p, flags %02x, begin %d, variable %p, type %08x\n", expression_list+i, expression_list[i].func, expression_list[i].var, expression_list[i].flags, expression_list[i].expr_begin, expression_list[i].value, expression_list[i].value_type);
+
+
+    uint32_t type;
+    expression *expr = top_expr;
+    int stack_size = -1;
+    printf("stack_size is %d with value %p, stack %p\n", stack_size, expr->value, stack);
+    double *ptr;
+    while (expr) {
+        printf("on expression %p, stack_size %d\n", expr, stack_size);
+        if ((expr->func) && (expr->var) && !(expr->var->flags & VARIABLE_FUNCTION) && !(expr->flags & EXPRESSION_PLOTTABLE)) {
+            if (stack_size == -1) stack_size = expr->value - stack;
+            printf("evaluating variable %s, expression %p, variable block %p, function block %p, stack_size %d\n", expr->var->name, expr, expr->var, expr->func, stack_size);
+            expr->var->pointer = stack+stack_size;
+            type = (expr->func->oper(expr->func, stack + stack_size));
+            printf("    result "); //print_object(type, stack+stack_size);
+            printf(" stored to %p (offset %d), has type %08x\n", stack+stack_size, stack_size, type);
+            if (type & TYPE_POINT) expr->flags |= EXPRESSION_PLOTTABLE | EXPRESSION_FIXED;
+            expr->value_type = type;
+            expr->value = stack+stack_size;
+            expr->var->type = type;
+            stack_size += (type>>8);
+        } //else if (expr->value) stack_size += ((expr->value_type) >> 8);
+        expr = expr->next_expr;
+    }
+
+    // Evaluate all expressions that are not definitions and are not dependent on x or y
+    for (expr=expression_list; expr < expression_list+n_expr; expr++) {
+        if ((expr->flags & EXPRESSION_FIXED) && !(expr->var)) {
+            printf("evaluating expression %p\n", expr);
+            type = (expr->func->oper(expr->func, stack + stack_size));
+            if (((type & TYPE_MASK) == TYPE_POINT) || ((type & TYPE_MASK) == TYPE_POLYGON)) expr->flags |= EXPRESSION_PLOTTABLE;
+            printf("    result "); //print_object(type, stack+stack_size);
+            printf(" stored to %p (offset %d), has type %08x\n", stack+stack_size, stack_size, type);
+            expr->value = stack + stack_size;
+            expr->value_type = type;
+            stack_size += (type>>8);
+        }
+        if (!(expr->func) && (expr->var)) {
+            expr->value = expr->var->pointer;
+            expr->value_type = expr->var->type;
+        }
+    }
+    *stack_size_ptr = stack_size;
+}
 
 /*
 L_{endpoints}=N_{c}\left[A_{pindex}\left(
@@ -545,6 +595,14 @@ int parse_latex_rec(char *latex, int end, function *function_list, double *stack
                 arg1_end -= 6;
                 arg1_start = cmd_end + 6;
                 oper = func_floor;
+            } else if ((cmd_len == 12) && (cmd_start+21 < end) && (strncmp(latex+cmd_start, "operatorname{polygon}", cmd_len+9) == 0)) {
+                cmd_end += 9;
+                arg1_end = extract_parenthetical(latex, cmd_end);
+                printf("multiply floor %.*s\n", arg1_end - cmd_end - 12, latex+cmd_end+6);
+                i = arg1_end;
+                arg1_end -= 6;
+                arg1_start = cmd_end + 6;
+                oper = func_polygon;
             } else if (((i == 0) || ((i >= 5) && (strncmp(latex+i-5, "\\cdot", 5) == 0))) && (cmd_len == 4) && (strncmp(latex+cmd_start, "left[", cmd_len+1) == 0)) {
                 // Brackets can only be interpreted as a list if they are the first thing in the expression
                 // or if they follow a \cdot.
@@ -647,7 +705,7 @@ int parse_latex_rec(char *latex, int end, function *function_list, double *stack
                 // Otherwise, interpret as a variable (such as \alpha or \beta)
                 int varindex = -1;
                 uint8_t flags;
-                for (int j=0; variable_list[j].name; j++) {
+                for (int j=0; j < *var_size; j++) {
                     uint8_t flags = variable_list[j].flags;
                     if ((flags & VARIABLE_IN_SCOPE) && (strncmp(variable_list[j].name, latex+cmd_start-1, cmd_end) == 0) && 
                             (strlen(variable_list[j].name) == cmd_end)) {
@@ -730,12 +788,15 @@ int parse_latex_rec(char *latex, int end, function *function_list, double *stack
                 // Multiply by a single variable or function
                 int varindex = -1;
                 uint8_t flags;
-                for (int j=0; variable_list[j].name; j++) {
+                for (int j=0; j < *var_size; j++) {
                     uint8_t flags = variable_list[j].flags;
+                    printf("comparing %.*s with variable %p\n", subscript-start+1, latex+start, variable_list+j);
                     if ((flags & VARIABLE_IN_SCOPE) && (strncmp(variable_list[j].name, latex+start, subscript-start+1) == 0) && (strlen(variable_list[j].name)==subscript-start+1)) {
                         varindex = j;
+                        printf("compare successful, match\n");
                         if (flags & VARIABLE_ARGUMENT) break; // If an argument is in scope, prefer it
                     }
+                    else printf("compare successful\n");
                 }
                 if (varindex == -1) {
                     // If the variable is not found, we may have to create one. The variable will remain
@@ -848,7 +909,7 @@ void parse_latex(char *latex, function *function_list, double *stack, variable *
         printf("%02d %p: first_arg: %p, next_arg: %p, oper: %p, value: %p\n", i, function_list+i, function_list[i].first_arg, function_list[i].next_arg, function_list[i].oper, function_list[i].value);
     }
 
-    for (i=0; variable_list[i].name; i++)
+    for (i=0; i < *var_size; i++)
         printf("%s variable pointer at %p, points to %p, type %08X\n", variable_list[i].name, &(variable_list[i].pointer), variable_list[i].pointer, variable_list[i].type);
 }
 
@@ -927,7 +988,7 @@ int parse_file(char *fname, function *function_list, double *stack, variable *va
                     continue;
                 }
                 // Check if the function has already been defined
-                for (int j=0; variable_list[j].name; j++) {
+                for (int j=0; variable_list+j < varpos; j++) {
                     if (strcmp(variable_list[j].name, line) == 0) {
                         printf("ERROR: multiple definition for %.*s\n", i, line);
                         exit(EXIT_FAILURE);
@@ -984,7 +1045,7 @@ int parse_file(char *fname, function *function_list, double *stack, variable *va
         exprpos++;
     }
     printf("loop done, %p, %p\n", variable_list->name, stringpos);
-    for (i=0; variable_list[i].name; i++)
+    for (i=0; variable_list+i < varpos; i++)
         printf("%s variable pointer at %p, points to %p, type %08X\n", variable_list[i].name, variable_list+i, variable_list[i].pointer, variable_list[i].type);
     fseek(fp, 0, SEEK_SET);
 
@@ -1164,44 +1225,16 @@ int parse_file(char *fname, function *function_list, double *stack, variable *va
     expression *expr = top_expr;
     while (expr) {
         printf("'%p', ", expr);
+        expr->value = stack + stack_size;
         expr = expr->next_expr;
     }
     printf("\n");
     
     // Evaluate all variables in accordance with the topological ordering
-    uint32_t type;
-    expr = top_expr;
-    while (expr) {
-        if ((expr->func) && (expr->var) && !(expr->var->flags & VARIABLE_FUNCTION) && !(expr->flags & EXPRESSION_PLOTTABLE)) {
-            printf("evaluating variable %s\n", expr->var->name);
-            expr->var->pointer = stack+stack_size;
-            type = (expr->func->oper(expr->func, stack + stack_size));
-            printf("    result "); print_object(type, stack+stack_size);
-            printf(" stored to %p, has type %08x\n", stack+stack_size, type);
-            if (type & TYPE_POINT) expr->flags |= EXPRESSION_PLOTTABLE | EXPRESSION_FIXED;
-            expr->value_type = type;
-            expr->value = stack+stack_size;
-            expr->var->type = type;
-            stack_size += (type>>8);
-        }
-        expr = expr->next_expr;
-    }
+    evaluate_from(expression_list, exprpos-expression_list, top_expr, stack, &stack_size);
 
-    // Evaluate all expressions that are not definitions and are not dependent on x or y
-    for (expr=expression_list; expr < exprpos; expr++) {
-        if ((expr->flags & EXPRESSION_FIXED) && !(expr->var)) {
-            printf("evaluating expression %p\n", expr);
-            type = (expr->func->oper(expr->func, stack + stack_size));
-            if (type & TYPE_POINT) expr->flags |= EXPRESSION_PLOTTABLE;
-            printf("    result "); print_object(type, stack+stack_size);
-            printf(" stored to %p, has type %08x\n", stack+stack_size, type);
-            expr->value = stack + stack_size;
-            expr->value_type = type;
-            stack_size += (type>>8);
-        }
-    }
 
-    for (i=0; variable_list[i].name; i++)
+    for (i=0; variable_list+i < varpos; i++)
         printf("%s variable pointer at %p, points to %p, type %08X, flags %02X\n", variable_list[i].name, variable_list+i, variable_list[i].pointer, variable_list[i].type, variable_list[i].flags);
 
     *n_func = func_pos;

@@ -62,6 +62,7 @@ variable new_variable(char *name, int type, uint8_t flags, double *pointer);
 
 void print_object(uint32_t type, double *pos);
 
+void evaluate_from(expression *expression_list, int n_expr, expression *top_expr, double *stack, int *stack_size_ptr);
 int parse_latex_rec(char *latex, int end, function *function_list, double *stack, variable *variable_list, char *stringbuf, int *stack_size, int *var_size, int *string_size, uint8_t *flags);
 void parse_latex(char *latex, function *function_list, double *stack, variable *variable_list, char *stringbuf, int *stack_size, int *var_size, int *string_size);
 int parse_file(char *fname, function *function_list, double *stack, variable *variable_list, char *stringbuf, expression *expression_list, uint32_t *n_func, uint32_t *n_var, uint32_t *n_expr);
