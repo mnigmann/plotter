@@ -236,6 +236,7 @@ void redraw_all(gpointer data_pointer) {
     double x1_scaled = ticksize*((int64_t)(window_x1/ticksize));
     for (double tick=x0_scaled; tick <= x1_scaled; tick+=ticksize) {
         xk = SCALE_XK(tick) / (1<<16);
+        if ((xk >= WIDTH) || (xk < 0)) continue;
         for (uint32_t i=3*xk; i < 3*WIDTH*HEIGHT; i+=3*WIDTH) {
             data[i] = COLOR_MAJOR_GRID;
             data[i+1] = COLOR_MAJOR_GRID;
@@ -428,7 +429,7 @@ static void activate (GtkApplication *app, gpointer user_data) {
 
     pixbuf = gdk_pixbuf_new_from_data(data, 0, 0, 8, WIDTH, HEIGHT, 3*WIDTH, NULL, NULL);
     image = gtk_image_new_from_pixbuf(pixbuf);
-    g_timeout_add(ticker_step, timeout_callback, image);
+    if (ticker_target >= 0) g_timeout_add(ticker_step, timeout_callback, image);
     g_signal_connect(G_OBJECT(event_box), "button_press_event", G_CALLBACK(button_press_callback), image);
     g_signal_connect(G_OBJECT(event_box), "button_release_event", G_CALLBACK(button_release_callback), image);
     g_signal_connect(G_OBJECT(event_box), "scroll_event", G_CALLBACK(scroll_callback), image);

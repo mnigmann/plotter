@@ -607,7 +607,13 @@ int parse_latex_rec(char *latex, int end, function *function_list, double *stack
             }
             i ++;
         }
-        
+        // Check if the previous term has a factorial
+        else if ((func_pos > 0) && (latex[i] == '!')) {
+            shift_blocks(function_list, last_pos, func_pos-last_pos);
+            func_pos++;
+            function_list[last_pos] = new_function(func_factorial, function_list[last_pos+1].next_arg, function_list+last_pos+1);
+            function_list[last_pos+1].next_arg = NULL;
+        }
         else if (latex[i] == '\\') {
             cmd_end = i+1;
             while (('a' <= latex[cmd_end]) && (latex[cmd_end] <= 'z')) cmd_end++;

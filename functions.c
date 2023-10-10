@@ -13,6 +13,12 @@
 
 #define FAIL(...) {printf(__VA_ARGS__); exit(EXIT_FAILURE);}
 
+const double lanczos_table[9] = {
+    0.99999999999980993, 676.5203681218851, -1259.1392167224028,
+    771.32342877765313, -176.61502916214059, 12.507343278686905,
+    -0.13857109526572012, 9.9843695780195716e-6, 1.5056327351493116e-7};
+
+
 uint32_t func_general_one_arg(void *f, double *stackpos, double (*oper)(double)) {
     function *fs = (function*)f;
     function *arg = fs->first_arg;
@@ -95,6 +101,19 @@ double mmod(double n, double d) {
     return i;
 }
 
+double mlogfac(double x) {
+    double v = lanczos_table[0];
+    for (int i=1; i < 9; i++) {
+        v += lanczos_table[i]/(x+i);
+    }
+    return 0.9189385332046727 + (x+0.5)*log(x+7.5) - (x+7.5) + log(v);
+}
+
+double mfac(double x) {
+    if (x < -0.5) return -M_PI / sin(M_PI*x) * exp(-mlogfac(-1-x));
+    return exp(mlogfac(x));
+}
+
 uint32_t func_div(void *f, double *stackpos) {
     return func_general_two_args(f, stackpos, fdiv);
 }
@@ -113,6 +132,10 @@ uint32_t func_sine(void *f, double *stackpos) {
 
 uint32_t func_cosine(void *f, double *stackpos) {
     return func_general_one_arg(f, stackpos, cos);
+}
+
+uint32_t func_factorial(void *f, double *stackpos) {
+    return func_general_one_arg(f, stackpos, mfac);
 }
 
 // The arctan function can have either one or two arguments
