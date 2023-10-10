@@ -1,0 +1,20 @@
+d_{x}=0.25
+d_{y}=0.25
+s=10
+\alpha=0
+\beta=0.75
+\left(\alpha,-\beta\right)
+F_{x}\left(t\right)=\cos\left(t\right)
+F_{y}\left(t\right)=\sin\left(t\right)
+F_{z}\left(t\right)=t
+F\left(x,y\right)=x^{2}-y^{2}
+\alpha\to \alpha+0.2
+P\left(x,y,z\right)=\left(x\cos\left(\alpha\right)-y\sin\left(\alpha\right),\left(x\sin\left(\alpha\right)+y\cos\left(\alpha\right)\right)\sin\left(\beta\right)+z\cos\left(\beta\right)\right)
+D\left(x,y,z\right)=\left(x\sin\left(\alpha\right)+y\cos\left(\alpha\right)\right)\cos\left(\beta\right)-z\sin\left(\beta\right)
+P\left(\left[0,1,2,2,1,0\right],\left[0,0,1,1,0,0\right],\left[0,0,0,1,1,1\right]\right)
+X=\left[-s,...,s-1\right]d_{x}
+Y=\left[-s,...,s-1\right]d_{y}
+N_{0}=\left[\left(X\left[\operatorname{mod}\left(p,2s\right)+1\right],Y\left[\operatorname{floor}\left(\frac{p}{2s}+1\right)\right]\right)\operatorname{for}p=\left[0,...,4s^{2}-1\right]\right]
+D_{c}=D\left(N_{0}.x,N_{0}.y,F\left(N_{0}.x,N_{0}.y\right)\right)+D\left(N_{0}.x+d_{x},N_{0}.y,F\left(N_{0}.x+d_{x},N_{0}.y\right)\right)+D\left(N_{0}.x+d_{x},N_{0}.y+d_{y},F\left(N_{0}.x+d_{x},N_{0}.y+d_{y}\right)\right)+D\left(N_{0}.x,N_{0}.y+d_{y},F\left(N_{0}.x,N_{0}.y+d_{y}\right)\right)
+N=N_{0}
+\operatorname{polygon}\left(P\left(N.x,N.y,F\left(N.x,N.y\right)\right),P\left(N.x+d_{x},N.y,F\left(N.x+d_{x},N.y\right)\right),P\left(N.x+d_{x},N.y+d_{y},F\left(N.x+d_{x},N.y+d_{y}\right)\right),P\left(N.x,N.y+d_{y},F\left(N.x,N.y+d_{y}\right)\right)\right)

@@ -55,7 +55,9 @@ uint32_t func_general_two_args(void *f, double *stackpos, double (*oper)(double,
     }
     l2 = t2>>8;
     if (!(t1 & TYPE_LIST) && !(t2 & TYPE_LIST)) {
+        //printf("func_general_two_args: %p (%f), %p (%f)", val1, *val1, val2, *val2);
         stackpos[0] = oper(*val1, *val2)*SIGN_BIT(fs);
+        //printf(" --> %f\n", stackpos[0]);
         return 1<<8;
     } else if ((t1 & TYPE_LIST) && !(t2 & TYPE_LIST)) {
         double v2 = *val2;
@@ -158,7 +160,7 @@ uint32_t func_add(void *f, double *stackpos) {
                 for (i=0; i < result_length; i++) stackpos[i] += stackpos[result_length];
             } else {
                 // The result is a scalar and the term is a scalar
-                sum += stackpos[0];
+                sum += stackpos[result_length];
             }
         }
         arg = arg->next_arg;
@@ -209,7 +211,7 @@ uint32_t func_multiply(void *f, double *stackpos) {
                 for (i=0; i < result_length; i++) stackpos[i] *= stackpos[result_length];
             } else {
                 // The result is a scalar and the term is a scalar
-                prod *= stackpos[0];
+                prod *= stackpos[result_length];
             }
         }
         arg = arg->next_arg;
@@ -244,7 +246,6 @@ uint32_t func_user_defined(void *f, double *stackpos) {
             type = arg->oper(arg, stackpos+st);
             target_arg[varnum].pointer = stackpos+st;
             target_arg[varnum].type = type;
-            varnum++;
             st += (type>>8);
         } else {
             type = ((arg->value_type)&0x40 ? ((variable*)(arg->value))->type : arg->value_type);
@@ -252,10 +253,10 @@ uint32_t func_user_defined(void *f, double *stackpos) {
             for (int i=0; i < len; i++) stackpos[st+i] = VALUE_LIST(arg, i);
             target_arg[varnum].pointer = stackpos+st;
             target_arg[varnum].type = type;
-            varnum++;
             st += len;
         }
-        //printf("argument is %08x\n", type);
+        //printf("argument is %08x:", type); print_object(type, target_arg[varnum].pointer);
+        varnum++;
         arg = arg->next_arg;
     } while (arg);
     type = target->oper(target, stackpos+st);
@@ -621,6 +622,28 @@ uint32_t func_extract_y(void *f, double *stackpos) {
         stackpos[i>>1] = stackpos[i+1];
     }
     return ((argtype>>1) & 0xffffff00) | ((argtype&0xff) & ~TYPE_MASK);
+}
+
+uint32_t func_assign(void *f, double *stackpos) {
+    function *fs = (function*)f;
+    function *target = fs->first_arg;
+    function *value = target->next_arg;
+
+    variable *target_var;
+    if ((target->oper == func_value) && (target->value_type & 0x40)) target_var = target->value;
+    else FAIL("ERROR: Cannot assign to non-variable\n");
+    
+    uint32_t argtype = value->oper(value, stackpos);
+    double *temp = malloc((argtype>>8)*sizeof(double));
+    memcpy(temp, stackpos, (argtype>>8)*sizeof(double));
+    target_var->new_pointer = temp;
+    target_var->new_type = argtype;
+
+    // Call the next action in the list. Comma-separated sequences are automatically
+    // parsed into chained blocks
+    if (fs->next_arg) fs->next_arg->oper(fs->next_arg, stackpos);
+
+    return 0;
 }
 
 

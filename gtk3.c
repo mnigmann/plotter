@@ -24,10 +24,10 @@
 
 guchar data[3*WIDTH*HEIGHT];
 GdkPixbuf *pixbuf;
-double window_x0 = -3;
-double window_y0 = -3;
-double window_x1 = 3;
-double window_y1 = 3;
+double window_x0 = -10;
+double window_y0 = -10;
+double window_x1 = 10;
+double window_y1 = 10;
 double xscale;
 double yscale;
 uint16_t nfev = 0;
@@ -39,12 +39,14 @@ double stack[65536];
 char stringbuf[500];
 
 uint32_t n_expr;
+expression *top_expr;
 
 clock_t t1, t2;
 
 uint8_t click_state = 0;
 double click_x;
 double click_y;
+int ticker_target, ticker_step;
 
 
 void draw_line(uint16_t x0, uint16_t y0, uint16_t x1, uint16_t y1) {
@@ -130,6 +132,7 @@ void draw_line(uint16_t x0, uint16_t y0, uint16_t x1, uint16_t y1) {
 
 void eval_func(double t, double *x, double *y, function *func, double *stackpos) {
     variable_list[0].pointer = &t;
+    variable_list[0].type = 1<<8;
     func->oper(func, stackpos);
     *y = stackpos[0];
     *x = t;
@@ -364,14 +367,30 @@ static gboolean motion_callback(GtkWidget *event_box, GdkEventMotion *event, gpo
 static gboolean timeout_callback(gpointer data_pointer) {
     // variable 5 is alpha, expression 3 is alpha definition
     printf("timeout_callback\n");
-    *variable_list[5].pointer = *variable_list[5].pointer + 0.1;
-    int stack_size;
-    printf("variable set to %f\n", *variable_list[5].pointer);
     clock_t t3 = clock();
-    evaluate_from(expression_list, n_expr, expression_list+3, stack, &stack_size);
-    clock_t t4 = clock();
-    printf("evaluation took %luus\n", t4-t3);
-    redraw_all(data_pointer);
+    expression_list[ticker_target].func->oper(expression_list[ticker_target].func, stack+60);
+    expression *expr = top_expr;
+    expression *from = NULL;
+    while (expr) {
+        if ((expr->var) && (expr->var->new_pointer)) {
+            printf("expression %p (offset %ld) has changed, expr->var %p\n", expr, expr - expression_list, expr->var);
+            if (!from) from = expr;
+            expr->var->pointer = expr->var->new_pointer;
+            expr->var->type = expr->var->new_type;
+            expr->var->new_pointer = NULL;
+            // If we assign to a variable, we must unlink the function block,
+            // or else the value will be overwritten
+            expr->func = NULL;
+        }
+        expr = expr->next_expr;
+    }
+    if (from) {
+        printf("evaluating from %p\n", from);
+        evaluate_from(expression_list, n_expr, from, stack+60);
+        redraw_all(data_pointer);
+        clock_t t4 = clock();
+        printf("Total time: %luus\n", t4-t3);
+    }
     return TRUE;
 }
 
@@ -409,7 +428,7 @@ static void activate (GtkApplication *app, gpointer user_data) {
 
     pixbuf = gdk_pixbuf_new_from_data(data, 0, 0, 8, WIDTH, HEIGHT, 3*WIDTH, NULL, NULL);
     image = gtk_image_new_from_pixbuf(pixbuf);
-    g_timeout_add(100, timeout_callback, image);
+    g_timeout_add(ticker_step, timeout_callback, image);
     g_signal_connect(G_OBJECT(event_box), "button_press_event", G_CALLBACK(button_press_callback), image);
     g_signal_connect(G_OBJECT(event_box), "button_release_event", G_CALLBACK(button_release_callback), image);
     g_signal_connect(G_OBJECT(event_box), "scroll_event", G_CALLBACK(scroll_callback), image);
@@ -434,8 +453,11 @@ int main (int argc, char **argv) {
     
     uint32_t n_func = 0;
     uint32_t n_var = 0;
-    parse_file(argv[1], function_list, stack, variable_list, stringbuf, expression_list, &n_func, &n_var, &n_expr);
+    top_expr = parse_file(argv[1], function_list, stack, variable_list, stringbuf, expression_list, &n_func, &n_var, &n_expr);
     printf("Parsing completed. %d function blocks, %d variables, %d expressions\n", n_func, n_var, n_expr);
+    ticker_target = (int)parse_double(argv[2]);
+    ticker_step = (int)parse_double(argv[3]);
+    printf("Expression %d will be evaluated every %d milliseconds\n", ticker_target, ticker_step);
 
     for (int i=0; i < n_expr; i++) {
         if ((i%7+1)&0x01) expression_list[i].color[0] = 255;
@@ -521,8 +543,8 @@ int main (int argc, char **argv) {
 
     app = gtk_application_new("org.gtk.example", G_APPLICATION_FLAGS_NONE);
     g_signal_connect(app, "activate", G_CALLBACK (activate), NULL);
-    for (int i=2; i < argc; i++) argv[i-1] = argv[i];
-    status = g_application_run(G_APPLICATION (app), argc-1, argv);
+    for (int i=4; i < argc; i++) argv[i-3] = argv[i];
+    status = g_application_run(G_APPLICATION (app), argc-3, argv);
     g_object_unref (app);
 
     return status;

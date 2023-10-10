@@ -37,5 +37,6 @@ uint32_t func_equals(void *f, double *stackpos);
 
 uint32_t func_extract_x(void *f, double *stackpos);
 uint32_t func_extract_y(void *f, double *stackpos);
+uint32_t func_assign(void *f, double *stackpos);
 
 #endif

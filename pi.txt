@@ -1,0 +1,4 @@
+v_{pi}=0
+n=0
+p=2\cdot3^{0.5}
+n\to n+1,v_{pi}\to v_{pi}+p\frac{\left(-1\right)^{n}}{2n+1},p\to \frac{p}{3}

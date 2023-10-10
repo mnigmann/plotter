@@ -10,6 +10,7 @@
 #define VARIABLE_XLIKE 0x10
 #define VARIABLE_YLIKE 0x20
 #define VARIABLE_XYLIKE 0x30
+#define VARIABLE_ACTION 0x40
 
 #define EXPRESSION_PLOTTABLE 0x01
 #define EXPRESSION_FIXED 0x02
@@ -37,9 +38,11 @@ typedef struct function_s {
 
 typedef struct variable_s {
     char *name;
-    uint32_t type;
     uint8_t flags;
     double *pointer;
+    uint32_t type;
+    double *new_pointer;
+    uint32_t new_type;
 } variable;
 
 typedef struct expression_s {
@@ -56,15 +59,17 @@ typedef struct expression_s {
     uint32_t value_type;
 } expression;
 
+double parse_double(char *string);
+
 function new_function(uint32_t (*oper)(void*, double*), function *next_arg, function *first_arg);
 function new_value(void *value, uint32_t value_type, function *next_arg);
 variable new_variable(char *name, int type, uint8_t flags, double *pointer);
 
 void print_object(uint32_t type, double *pos);
 
-void evaluate_from(expression *expression_list, int n_expr, expression *top_expr, double *stack, int *stack_size_ptr);
+void evaluate_from(expression *expression_list, int n_expr, expression *top_expr, double *stack);
 int parse_latex_rec(char *latex, int end, function *function_list, double *stack, variable *variable_list, char *stringbuf, int *stack_size, int *var_size, int *string_size, uint8_t *flags);
 void parse_latex(char *latex, function *function_list, double *stack, variable *variable_list, char *stringbuf, int *stack_size, int *var_size, int *string_size);
-int parse_file(char *fname, function *function_list, double *stack, variable *variable_list, char *stringbuf, expression *expression_list, uint32_t *n_func, uint32_t *n_var, uint32_t *n_expr);
+expression* parse_file(char *fname, function *function_list, double *stack, variable *variable_list, char *stringbuf, expression *expression_list, uint32_t *n_func, uint32_t *n_var, uint32_t *n_expr);
 
 #endif
