@@ -650,6 +650,39 @@ int parse_latex_rec(char *latex, int end, function *function_list, double *stack
                 arg1_end -= 6;
                 arg1_start = cmd_end + 6;
                 oper = func_sine;
+            } else if ((cmd_len == 3) && (strncmp(latex+cmd_start, "sum", cmd_len)==0)) {
+                // Sums have three parts: a definition, an end point, and an expression to be summed
+                // We assume that the entire remaining expression is the sum
+                i = cmd_end;
+                subscript = extract_braces(latex, i+1);
+                superscript = extract_braces(latex, subscript+2);
+                printf("Sum found, %d, %d\n", subscript, superscript);
+                arg1_end = get_next_match(latex, i+2, subscript, '=');
+                printf("Variable is %.*s\n", arg1_end-i-2, latex+i+2);
+                printf("Initial value is %.*s\n", subscript-arg1_end-1, latex+arg1_end+1);
+                printf("Final value is %.*s\n", superscript-subscript-3, latex+subscript+3);
+                last_pos = func_pos;
+                function_list[func_pos] = new_function(func_sum, NULL, function_list+func_pos+1);
+                func_pos++;
+                function_list[func_pos] = new_value(NULL, 0x40, function_list+func_pos+1);
+                func_pos++;
+                int prev = func_pos;
+                func_pos += PARSE_LATEX_REC(latex+arg1_end+1, subscript-arg1_end-1, function_list+func_pos);
+                function_list[prev].next_arg = function_list + func_pos;
+                prev = func_pos;
+                func_pos += PARSE_LATEX_REC(latex+subscript+3, superscript-subscript-3, function_list+func_pos);
+                function_list[prev].next_arg = function_list + func_pos;
+                // Create a new variable for the summation index
+                strncpy(stringbuf + *string_size, latex+i+2, arg1_end-i-2);
+                variable_list[*var_size] = new_variable(stringbuf + *string_size, 0, VARIABLE_IN_SCOPE, NULL);
+                *string_size += arg1_end-1;
+                *var_size += 1;
+                // Parse the expression
+                func_pos += PARSE_LATEX_REC(latex+superscript+1, end-superscript-1, function_list+func_pos);
+                variable_list[*var_size-1].flags &= ~VARIABLE_IN_SCOPE;
+                function_list[last_pos+1].value = variable_list + (*var_size-1);
+                printf("parsing %.*s done, func_pos %d\n", end, latex, func_pos);
+                return func_pos;
             } else if ((cmd_len == 12) && (cmd_start+17 < end) && (strncmp(latex+cmd_start, "operatorname{mod}", cmd_len+5) == 0)) {
                 cmd_end += 5;
                 arg1_end = extract_parenthetical(latex, cmd_end);

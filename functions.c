@@ -106,6 +106,7 @@ double mlogfac(double x) {
     for (int i=1; i < 9; i++) {
         v += lanczos_table[i]/(x+i);
     }
+    // log(2*pi)/2
     return 0.9189385332046727 + (x+0.5)*log(x+7.5) - (x+7.5) + log(v);
 }
 
@@ -669,4 +670,63 @@ uint32_t func_assign(void *f, double *stackpos) {
     return 0;
 }
 
+uint32_t func_sum(void *f, double *stackpos) {
+    function *fs = (function*)f;
+    function *var = fs->first_arg;
+    function *start = var->next_arg;
+    function *end = start->next_arg;
+    function *expr = end->next_arg;
+    variable *varptr = var->value;
+    uint32_t t_start, t_end, t_expr, st=0;
+    t_start = start->oper(start, stackpos);
+    st += t_start>>8;
+    t_end = end->oper(end, stackpos+st);
+    double *val1 = stackpos, *val2 = stackpos+st;
+    st += t_end>>8;
+    
+    uint32_t result_length = 0;
+    uint32_t result_type = 0;
+    double value;
+    double sum = 0;
+    int i;
+    double start_val = *val1;
+    double end_val = *val2;
+    if (!(t_start & TYPE_LIST) && !(t_end & TYPE_LIST)) {
+        varptr->pointer = &value;
+        varptr->type = 0x100;
+        for (value=start_val; value <= end_val; value++) {
+            t_expr = expr->oper(expr, stackpos+result_length);
+            uint32_t len = t_expr>>8;
+            if (t_expr & TYPE_LIST) {
+                if (result_type & TYPE_LIST) {
+                    // The result has already been made a list, so we multiply and pick the minimum length
+                    for (i=0; (i < result_length) && (i < len); i++) stackpos[st+i] += stackpos[result_length+i];
+                    // i will be the minimum of result_length and len
+                    result_length = i;
+                    result_type = TYPE_LIST;
+                } else {
+                    // The result is currently a scalar and must be updated
+                    for (i=0; i < len; i++) stackpos[i] += sum;
+                    result_length = len;
+                    result_type = TYPE_LIST;
+                }
+            } else {
+                if (result_type & TYPE_LIST) {
+                    // The result is already a list but the current term is a scalar
+                    for (i=0; i < result_length; i++) stackpos[i] += stackpos[result_length];
+                } else {
+                    // The result is a scalar and the term is a scalar
+                    sum += stackpos[result_length];
+                }
+            }
+        }
+    }
+    if (!(result_type & TYPE_LIST)) {
+        stackpos[0] = sum*SIGN_BIT(fs);
+        result_length = 1;
+    } else {
+        for (int j=0; j < result_length; j++) stackpos[j] = stackpos[j]*SIGN_BIT(fs);
+    }
+    return (result_length<<8) | result_type;
+}
 
