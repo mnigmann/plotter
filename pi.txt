@@ -1,3 +1,4 @@
+# Compute pi
 v_{pi}=0
 n=0
 p=2\cdot3^{0.5}

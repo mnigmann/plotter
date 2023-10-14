@@ -1,0 +1,10 @@
+n=12
+P=\left[\left(-3.643400218208497,3.19208018235995\right),\left(2.940297138238641,-4.324961181820467\right),\left(4.353619276319222,-1.0215581404960572\right),\left(3.7524868356636922,-4.779727484527751\right),\left(3.8274566866299615,3.8456448265766756\right),\left(-0.8481100621435242,4.749984108686826\right),\left(4.02648417988013,4.6164864705638\right),\left(4.006948837018818,-3.2976714475666027\right),\left(-0.21805814420604186,2.152525014157095\right),\left(2.2404870164280934,-2.433611949969301\right),\left(4.6331165482972185,-2.731030644332937\right),\left(2.930828271115457,-0.9812773016919252\right)\right]
+M=\left[\left(1,2\right),\left(2,3\right),\left(3,4\right),\left(4,5\right),\left(5,6\right),\left(6,1\right),\left(1,7\right),\left(2,8\right),\left(3,9\right),\left(4,10\right),\left(5,11\right),\left(6,12\right)\right]
+\operatorname{polygon}\left(P\left[M.x\right],P\left[M.y\right]\right)
+\alpha=0.1
+\beta=0.03
+F_{e}=\left[\operatorname{total}\left(\left\{\left[1,...,n\right]=i:\left(0,0\right),\frac{P\left[i\right]-P}{\operatorname{distance}\left(P\left[i\right],P\right)^{1.5}}\right\}\right)\operatorname{for}i=\left[1,...,n\right]\right]
+F_{s}=\left[\operatorname{total}\left(\left\{M.x=i:P\left[M.y\right]-P\left[i\right],M.y=i:P\left[M.x\right]-P\left[i\right],\left(0,0\right)\right\}\right)\operatorname{for}i=\left[1,...,n\right]\right]
+D=F_{e}\alpha+F_{s}\beta
+P\to P+D

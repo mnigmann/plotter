@@ -300,16 +300,21 @@ void redraw_all(gpointer data_pointer) {
             } else if ((expression_list[i].flags & EXPRESSION_FIXED) && ((expression_list[i].value_type & TYPE_MASK) == TYPE_POLYGON)) {
                 int len = (expression_list[i].value_type) >> 8;
                 double *ptr = expression_list[i].value;
+                double x_temp, y_temp;
                 for (int p=0; p < len; p += 2*MAX_POLYGON_SIZE) {
-                    pt_x0 = SCALE_XK(ptr[p+2*MAX_POLYGON_SIZE-2]);
-                    pt_y0 = SCALE_YK(ptr[p+2*MAX_POLYGON_SIZE-1]);
-                    for (int k=0; k < MAX_POLYGON_SIZE; k++) {
-                        pt_x1 = SCALE_XK(ptr[p+2*k]);
-                        pt_y1 = SCALE_YK(ptr[p+2*k+1]);
-                        LineAA((uint8_t*)data, WIDTH, HEIGHT, pt_x0, pt_y0, pt_x1, pt_y1, expression_list[i].color);
-                        pt_x0 = pt_x1;
-                        pt_y0 = pt_y1;
+                    pt_x0 = SCALE_XK(ptr[p]);
+                    pt_y0 = SCALE_YK(ptr[p+1]);
+                    for (int k=1; k < MAX_POLYGON_SIZE; k++) {
+                        x_temp = ptr[p+2*k]; y_temp = ptr[p+2*k+1];
+                        if ((x_temp+1 > x_temp) && (y_temp+1 > y_temp)) {
+                            pt_x1 = SCALE_XK(x_temp);
+                            pt_y1 = SCALE_YK(y_temp);
+                            LineAA((uint8_t*)data, WIDTH, HEIGHT, pt_x0, pt_y0, pt_x1, pt_y1, expression_list[i].color);
+                            pt_x0 = pt_x1;
+                            pt_y0 = pt_y1;
+                        }
                     }
+                    LineAA((uint8_t*)data, WIDTH, HEIGHT, pt_x0, pt_y0, SCALE_XK(ptr[p]), SCALE_YK(ptr[p+1]), expression_list[i].color);
                 }
             } else {
                 draw_function_slow(expression_list[i].func, stack+60, expression_list[i].color);
@@ -461,11 +466,11 @@ int main (int argc, char **argv) {
     printf("Expression %d will be evaluated every %d milliseconds\n", ticker_target, ticker_step);
 
     for (int i=0; i < n_expr; i++) {
-        if ((i%7+1)&0x01) expression_list[i].color[0] = 255;
+        if ((i%6+1)&0x01) expression_list[i].color[0] = 255;
         else expression_list[i].color[0] = 0;
-        if ((i%7+1)&0x02) expression_list[i].color[1] = 255;
+        if ((i%6+1)&0x02) expression_list[i].color[1] = 255;
         else expression_list[i].color[1] = 0;
-        if ((i%7+1)&0x04) expression_list[i].color[2] = 255;
+        if ((i%6+1)&0x04) expression_list[i].color[2] = 255;
         else expression_list[i].color[2] = 0;
     }
 

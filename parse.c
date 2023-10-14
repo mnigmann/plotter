@@ -270,7 +270,7 @@ void evaluate_from(expression *expression_list, int n_expr, expression *top_expr
     double *ptr;
     while (expr) {
         //printf("on expression %p, stack_size %d\n", expr, stack_size);
-        if ((expr->func) && (expr->var) && !(expr->var->flags & VARIABLE_FUNCTION) && !(expr->flags & EXPRESSION_PLOTTABLE)) {
+        if ((expr->func) && (expr->var) && !(expr->var->flags & VARIABLE_FUNCTION) && ((expr->flags & EXPRESSION_FIXED) || !(expr->flags & EXPRESSION_PLOTTABLE))) {
             printf("evaluating variable %s, expression %p, variable block %p, function block %p, old pointer %p\n", expr->var->name, expr, expr->var, expr->func, expr->value);
             type = (expr->func->oper(expr->func, stack));
             // If the siz changes, reallocate. Otherwise, use the same memory
@@ -278,7 +278,7 @@ void evaluate_from(expression *expression_list, int n_expr, expression *top_expr
                 ptr = realloc(expr->value, (type>>8)*sizeof(double));
             else ptr = expr->value;
             memcpy(ptr, stack, (type>>8)*sizeof(double));
-            printf("    result "); print_object_short(type, ptr);
+            printf("    result "); print_object(type, ptr);
             printf(" stored to %p, has type %08x\n", ptr, type);
             if (type & TYPE_POINT) expr->flags |= EXPRESSION_PLOTTABLE | EXPRESSION_FIXED;
             expr->var->pointer = ptr;
@@ -300,7 +300,7 @@ void evaluate_from(expression *expression_list, int n_expr, expression *top_expr
             else ptr = expr->value;
             memcpy(ptr, stack, (type>>8)*sizeof(double));
             if (((type & TYPE_MASK) == TYPE_POINT) || ((type & TYPE_MASK) == TYPE_POLYGON)) expr->flags |= EXPRESSION_PLOTTABLE;
-            printf("    result "); print_object_short(type, ptr);
+            printf("    result "); print_object(type, ptr);
             printf(" stored to %p, has type %08x\n", ptr, type);
             expr->value = ptr;
             expr->value_type = type;
@@ -456,6 +456,21 @@ int parse_latex_rec(char *latex, int end, function *function_list, double *stack
     if (n_terms) {
         *result_flags |= PARSE_COMMA;
         printf("parsing %.*s done, func_pos %d\n", end, latex, func_pos);
+        return func_pos;
+    }
+
+    // Decompose equality (=)
+    n_braces = 0;
+    n_leftright = 0;
+    int index_equals = get_next_match(latex, 0, end, '=');
+    if (index_equals >= 0) {
+        function_list[0] = new_function(func_equals, NULL, function_list+1);
+        func_pos++;
+        func_pos += PARSE_LATEX_REC(latex, index_equals, function_list+func_pos);
+        function_list[1].next_arg = function_list + func_pos;
+        index_equals++;
+        if (latex[index_equals] == ' ') index_equals++;
+        func_pos += PARSE_LATEX_REC(latex+index_equals, end-index_equals, function_list+func_pos);
         return func_pos;
     }
 
@@ -707,6 +722,22 @@ int parse_latex_rec(char *latex, int end, function *function_list, double *stack
                 arg1_end -= 6;
                 arg1_start = cmd_end + 6;
                 oper = func_polygon;
+            } else if ((cmd_len == 12) && (cmd_start+19 < end) && (strncmp(latex+cmd_start, "operatorname{total}", cmd_len+7) == 0)) {
+                cmd_end += 7;
+                arg1_end = extract_parenthetical(latex, cmd_end);
+                printf("multiply total %.*s\n", arg1_end - cmd_end - 12, latex+cmd_end+6);
+                i = arg1_end;
+                arg1_end -= 6;
+                arg1_start = cmd_end + 6;
+                oper = func_total;
+            } else if ((cmd_len == 12) && (cmd_start+22 < end) && (strncmp(latex+cmd_start, "operatorname{distance}", cmd_len+10) == 0)) {
+                cmd_end += 10;
+                arg1_end = extract_parenthetical(latex, cmd_end);
+                printf("multiply floor %.*s\n", arg1_end - cmd_end - 12, latex+cmd_end+6);
+                i = arg1_end;
+                arg1_end -= 6;
+                arg1_start = cmd_end + 6;
+                oper = func_distance;
             } else if (((i == 0) || ((i >= 5) && (strncmp(latex+i-5, "\\cdot", 5) == 0))) && (cmd_len == 4) && (strncmp(latex+cmd_start, "left[", cmd_len+1) == 0)) {
                 // Brackets can only be interpreted as a list if they are the first thing in the expression
                 // or if they follow a \cdot.
@@ -805,19 +836,60 @@ int parse_latex_rec(char *latex, int end, function *function_list, double *stack
                 }
                 arg1_end = 0;
                 arg2_end = 0;
+            } else if ((cmd_len == 4) && (strncmp(latex+cmd_start, "left\\{", cmd_len+2) == 0)) {
+                arg1_end = extract_braces(latex, cmd_start+5);
+                printf("Found conditional from %d to %d: %.*s\n", cmd_start+6, arg1_end-7, arg1_end-cmd_start-13, latex+cmd_start+6);
+                last_pos = func_pos;
+                function_list[func_pos] = new_function(func_conditional, NULL, function_list+func_pos+1);
+                func_pos++;
+                i = cmd_start+5;
+                uint8_t chain = 0;
+                while (1>0) {
+                    arg2_start = get_next_match(latex, i+1, arg1_end-7, ':');
+                    if (arg2_start < 0) break;
+                    printf("colon found at %d, %p\n", arg2_start, function_list+func_pos);
+                    if (chain) function_list[last_pos].next_arg = function_list + func_pos;
+                    chain = 1;
+                    last_pos = func_pos;
+                    func_pos += PARSE_LATEX_REC(latex+i+1, arg2_start-i-1, function_list+func_pos);
+                    i = get_next_match(latex, arg2_start, arg1_end-7, ',');
+                    if (i < 0) break;
+                    printf("comma found at %d, %p\n", i, function_list+func_pos);
+                    function_list[last_pos].next_arg = function_list + func_pos;
+                    last_pos = func_pos;
+                    func_pos += PARSE_LATEX_REC(latex+arg2_start+1, i-arg2_start-1, function_list+func_pos);
+                }
+                // Failed to find colon, last separator is comma, ends with a default expression
+                if (arg2_start < 0) {
+                    function_list[last_pos].next_arg = function_list + func_pos;
+                    last_pos = func_pos;
+                    func_pos += PARSE_LATEX_REC(latex+i+1, arg1_end-i-8, function_list+func_pos);
+                } 
+                // Failed to find comma, last separator is colon, ends with no default expression
+                else {
+                    function_list[last_pos].next_arg = function_list + func_pos;
+                    last_pos = func_pos;
+                    func_pos += PARSE_LATEX_REC(latex+arg2_start+1, arg1_end-arg2_start-8, function_list+func_pos);
+                }
+                    
+                i = arg1_end;
+                arg1_end = 0;
+                arg2_end = 0;
             } else {
                 // Otherwise, interpret as a variable (such as \alpha or \beta)
                 int varindex = -1;
                 uint8_t flags;
                 for (int j=0; j < *var_size; j++) {
                     uint8_t flags = variable_list[j].flags;
-                    if ((flags & VARIABLE_IN_SCOPE) && (strncmp(variable_list[j].name, latex+cmd_start-1, cmd_end) == 0) && 
-                            (strlen(variable_list[j].name) == cmd_end)) {
+                    //printf("comparin %.*s with %.*s, lengths %d and %d\n", cmd_len+1, variable_list[j].name, cmd_len+1, latex+cmd_start-1, strlen(variable_list[j].name)
+                    if ((flags & VARIABLE_IN_SCOPE) && (strncmp(variable_list[j].name, latex+cmd_start-1, cmd_len+1) == 0) && 
+                            (strlen(variable_list[j].name) == cmd_len+1)) {
                         varindex = j;
                         if (flags & VARIABLE_ARGUMENT) break; // If an argument is in scope, prefer it
                     }
                 }
                 if (varindex == -1) {
+                    for (int j=0; j < *var_size; j++) printf("variable %s at %p has flags %02x\n", variable_list[j].name, variable_list+j, variable_list[j].flags);
                     printf("ERROR: variable %.*s not found!\n", cmd_len+1, latex+cmd_start-1);
                     exit(EXIT_FAILURE);
                 }
@@ -1064,6 +1136,7 @@ expression* parse_file(char *fname, function *function_list, double *stack, vari
     while ((read = getline(&line, &len, fp)) != -1) {
         printf("Found expression of length %zd\n", read);
         if (read <= 1) continue;
+        if (line[0] == '#') continue;
         printf("    %s", line);
         line[read-1] = 0;
         exprpos[0] = new_expression(NULL, NULL, NULL, 0, 0);
@@ -1166,6 +1239,7 @@ expression* parse_file(char *fname, function *function_list, double *stack, vari
     variable *local_variable = NULL;
     while ((read = getline(&line, &len, fp)) != -1) {
         if (read <= 1) continue;
+        if (line[0] == '#') continue;
         if (line[read-1] == '\n') line[read-1] = 0;
         i = exprpos->expr_begin;
         exprpos->dependencies = deptable+deptable_ofs;
