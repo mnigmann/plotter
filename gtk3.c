@@ -14,11 +14,13 @@
 #define SCALE_XF(v) ((int64_t)(250L*(1<<16)*(1+v)))
 #define SCALE_YF(v) ((int64_t)(250L*(1<<16)*(1-v)))
 
-#define SCALE_XK(v) ((int64_t)((v - window_x0)*xscale))
-#define SCALE_YK(v) ((int64_t)((window_y1 - v)*yscale))
+#define SCALE_XK(v) ((v - window_x0)*xscale)
+#define SCALE_YK(v) ((window_y1 - v)*yscale)
 
 #define CLIP_WIDTH(v) (v<0 ? 0 : (v>WIDTH ? WIDTH : v))
 #define CLIP_HEIGHT(v) (v<0 ? 0 : (v>HEIGHT ? HEIGHT : v))
+#define IN_BOUNDS(x, y) ((window_x0 <= x) && (x < window_x1) && (window_y0 <= y) && (y < window_y1))
+#define SET_COLOR(cr, color) cairo_set_source_rgb(cr, color[0]/256.0, color[1]/256.0, color[2]/256.0)
 
 #define TOIDX(x, y) (3*(x + y*WIDTH))
 
@@ -33,7 +35,7 @@ double yscale;
 uint16_t nfev = 0;
 
 function function_list[500];
-variable variable_list[30];
+variable variable_list[50];
 expression expression_list[100];
 double stack[65536];
 char stringbuf[500];
@@ -47,88 +49,10 @@ uint8_t click_state = 0;
 double click_x;
 double click_y;
 int ticker_target, ticker_step;
+uint8_t run_ticker;
 
+cairo_matrix_t transform_matrix;
 
-void draw_line(uint16_t x0, uint16_t y0, uint16_t x1, uint16_t y1) {
-    if ((x0 < 0) || (x0 >= WIDTH) || (y0 < 0) || (y0 >= HEIGHT) || (x1 < 0) || (x1 >= WIDTH) || (y1 < 0) || (y1 >= HEIGHT)) return;
-    //data[TOIDX(x0, y0)+1] = 255;
-    //data[TOIDX(x1, y1)+1] = 255;
-    uint16_t xmin, xmax, ymin, ymax, ystart;
-    if (x1 > x0) {
-        xmin = x0;
-        ystart = y0;
-        xmax = x1;
-    } else {
-        xmin = x1;
-        ystart = y1;
-        xmax = x0;
-    }
-    if (y1 > y0) {
-        ymin = y0;
-        ymax = y1;
-    } else {
-        ymin = y1;
-        ymax = y0;
-    }
-    uint16_t a = ymax - ymin;
-    uint16_t b = xmax - xmin;
-    uint32_t pos = 3*(xmin + ystart*WIDTH);
-    if ((x1 > x0) != (y1 > y0)) {
-        // Ascending line
-        if (b >= a) {
-            // Line is more horizontal
-            int16_t f = -b;
-            for (uint16_t i=xmin; i <= xmax; i++) {
-                data[pos+2] = 255;
-                pos+=3;
-                f += 2*a;
-                if (f > 0) {
-                    pos -= 3*WIDTH;
-                    f -= 2*b;
-                }
-            }
-        } else {
-            // Line is more vertical
-            int16_t f = -a;
-            for (uint16_t i=ymin; i <= ymax; i++) {
-                data[pos+2] = 255;
-                pos-=3*WIDTH;
-                f += 2*b;
-                if (f > 0) {
-                    pos += 3;
-                    f -= 2*a;
-                }
-            }
-        }
-    } else {
-        // Descending line
-        if (b >= a) {
-            // Line is more horizontal
-            int16_t f = -b;
-            for (uint16_t i=xmin; i <= xmax; i++) {
-                data[pos+2] = 255;
-                pos+=3;
-                f += 2*a;
-                if (f > 0) {
-                    pos += 3*WIDTH;
-                    f -= 2*b;
-                }
-            }
-        } else {
-            // Line is more vertical
-            int16_t f = -a;
-            for (uint16_t i=ymin; i <= ymax; i++) {
-                data[pos+2] = 255;
-                pos+=3*WIDTH;
-                f += 2*b;
-                if (f > 0) {
-                    pos += 3;
-                    f -= 2*a;
-                }
-            }
-        }
-    }
-}
 
 void eval_func(double t, double *x, double *y, function *func, double *stackpos) {
     variable_list[0].pointer = &t;
@@ -189,15 +113,19 @@ void draw_function(function *func, double *stackpos, uint8_t *color) {
     g_print("Drawing took %lu, nfev: %d\n", t2-t1, nfev);
 }
 
-void draw_function_slow(function *func, double *stackpos, uint8_t *color) {
+void draw_function_slow(function *func, double *stackpos, uint8_t *color, cairo_t *cr) {
+    SET_COLOR(cr, color);
     double x, y, xp, yp;
     eval_func(window_x0, &xp, &yp, func, stackpos);
+    cairo_move_to(cr, SCALE_XK(xp), SCALE_YK(yp));
     double minstep_x = (window_x1 - window_x0)/WIDTH;
     for (double t = window_x0+minstep_x; t < window_x1; t+=minstep_x) {
         eval_func(t, &x, &y, func, stackpos);
-        if ((x+1 > x) && (y+1 > y) && (xp+1 > xp) && (yp+1 > yp)) LineAA((uint8_t*)data, WIDTH, HEIGHT, SCALE_XK(xp), SCALE_YK(yp), SCALE_XK(x), SCALE_YK(y), color);
+        if ((x+1 > x) && (y+1 > y) && (xp+1 > xp) && (yp+1 > yp) && (IN_BOUNDS(x, y) || IN_BOUNDS(xp, yp))) cairo_line_to(cr, SCALE_XK(x), SCALE_YK(y));
+        else if ((x+1 > x) && (y+1 > y)) cairo_move_to(cr, SCALE_XK(x), SCALE_YK(y));
         xp = x; yp = y;
     }
+    cairo_stroke(cr);
 }
 
 static gboolean button_press_callback (GtkWidget *event_box, GdkEventButton *event, gpointer data) {
@@ -215,13 +143,15 @@ static gboolean button_release_callback (GtkWidget *event_box, GdkEventButton *e
     return TRUE;
 }
 
-void redraw_all(gpointer data_pointer) {
-    xscale = (1<<16)*1.0*WIDTH/(window_x1 - window_x0);
-    yscale = (1<<16)*1.0*HEIGHT/(window_y1 - window_y0);
-    t1 = clock();
-    memset(data, 255, 3*WIDTH*HEIGHT);
+gboolean redraw_all(GtkWidget *widget, cairo_t *cr, gpointer data_pointer) {
+    cairo_set_source_rgb(cr, COLOR_MAJOR_GRID/256.0, COLOR_MAJOR_GRID/256.0, COLOR_MAJOR_GRID/256.0);
+    cairo_set_line_width(cr, 1.0);
     
-    int16_t logx = round(3*log10((TICK_SIZE<<16) / xscale));
+    xscale = 1.0*WIDTH/(window_x1 - window_x0);
+    yscale = 1.0*HEIGHT/(window_y1 - window_y0);
+    t1 = clock();
+    
+    int16_t logx = round(3*log10(TICK_SIZE / xscale));
     int8_t basex = logx%3;
     basex = (basex<0 ? 3+basex : basex);
     int16_t decadex = (logx - basex)/3;
@@ -235,24 +165,11 @@ void redraw_all(gpointer data_pointer) {
     double x0_scaled = ticksize*((int64_t)(window_x0/ticksize));
     double x1_scaled = ticksize*((int64_t)(window_x1/ticksize));
     for (double tick=x0_scaled; tick <= x1_scaled; tick+=ticksize) {
-        xk = SCALE_XK(tick) / (1<<16);
-        if ((xk >= WIDTH) || (xk < 0)) continue;
-        for (uint32_t i=3*xk; i < 3*WIDTH*HEIGHT; i+=3*WIDTH) {
-            data[i] = COLOR_MAJOR_GRID;
-            data[i+1] = COLOR_MAJOR_GRID;
-            data[i+2] = COLOR_MAJOR_GRID;
-        }
-    }
-    if ((window_x0 <= 0) && (0 < window_x1)) {
-        xk = SCALE_XK(0) / (1<<16);
-        for (uint32_t i=3*xk; i < 3*WIDTH*HEIGHT; i+=3*WIDTH) {
-            data[i] = COLOR_AXES;
-            data[i+1] = COLOR_AXES;
-            data[i+2] = COLOR_AXES;
-        }
+        cairo_move_to(cr, SCALE_XK(tick), 0);
+        cairo_line_to(cr, SCALE_XK(tick), HEIGHT);
     }
     
-    int16_t logy = round(3*log10((TICK_SIZE<<16) / yscale));
+    int16_t logy = round(3*log10(TICK_SIZE / yscale));
     int8_t basey = logy%3;
     basey = (basey<0 ? 3+basey : basey);
     int16_t decadey = (logy - basey)/3;
@@ -264,76 +181,79 @@ void redraw_all(gpointer data_pointer) {
     double y0_scaled = ticksize*((int64_t)(window_y0/ticksize));
     double y1_scaled = ticksize*((int64_t)(window_y1/ticksize));
     for (double tick=y0_scaled; tick <= y1_scaled; tick+=ticksize) {
-        xk = SCALE_YK(tick) / (1<<16);
-        if ((xk >= HEIGHT) || (xk < 0)) continue;
-        xk = 3*WIDTH*xk;
-        for (uint32_t i=0; i < 3*WIDTH; i++) {
-            data[xk + i] = COLOR_MAJOR_GRID;
-        }
+        cairo_move_to(cr, 0, SCALE_YK(tick));
+        cairo_line_to(cr, WIDTH, SCALE_YK(tick));
+    }
+
+    cairo_stroke(cr);
+    // Draw axes gridlines
+    cairo_set_source_rgb(cr, COLOR_AXES/256.0, COLOR_AXES/256.0, COLOR_AXES/256.0);
+    if ((window_x0 <= 0) && (0 < window_x1)) {
+        cairo_move_to(cr, SCALE_XK(0), 0);
+        cairo_line_to(cr, SCALE_XK(0), HEIGHT);
     }
     if ((window_y0 < 0) && (0 <= window_y1)) {
-        int64_t yk = SCALE_YK(0)/(1<<16);
-        for (uint16_t i=0; i < 3*WIDTH; i++) {
-            data[3*yk*WIDTH + i] = COLOR_AXES;
-        }
+        cairo_move_to(cr, 0, SCALE_YK(0));
+        cairo_line_to(cr, WIDTH, SCALE_YK(0));
     }
-    
-    t3 = clock();
-    int64_t pt_x0, pt_x1, pt_y0, pt_y1;
+    cairo_stroke(cr);
+    double pt_x, pt_y, pt_x1, pt_y1;
     for (int i=0; i < n_expr; i++) {
         if (expression_list[i].flags & EXPRESSION_PLOTTABLE) {
             if ((expression_list[i].flags & EXPRESSION_FIXED) && ((expression_list[i].value_type & TYPE_MASK) == TYPE_POINT)) {
                 int len = (expression_list[i].value_type) >> 8;
                 double *ptr = expression_list[i].value;
+                SET_COLOR(cr, expression_list[i].color);
                 for (int p=0; p < len; p+=2) {
-                    pt_x0 = (SCALE_XK(ptr[p])>>16)-POINT_SIZE;
-                    pt_x1 = CLIP_WIDTH(pt_x0 + POINT_SIZE*2);
-                    pt_x0 = CLIP_WIDTH(pt_x0);
-                    pt_y0 = (SCALE_YK(ptr[p+1])>>16)-POINT_SIZE;
-                    pt_y1 = CLIP_HEIGHT(pt_y0 + POINT_SIZE*2);
-                    pt_y0 = CLIP_HEIGHT(pt_y0);
-                    if (pt_x0 == pt_x1) continue;
-                    for (int j=pt_y0; j < pt_y1; j++) {
-                        for (int k=pt_x0; k < pt_x1; k++) memcpy(data + TOIDX(k, j), expression_list[i].color, 3);
-                    }
+                    pt_x = SCALE_XK(ptr[p]);
+                    pt_y = SCALE_YK(ptr[p+1]);
+                    cairo_arc(cr, pt_x, pt_y, POINT_SIZE, 0, 2*G_PI);
+                    cairo_fill(cr);
                 }
             } else if ((expression_list[i].flags & EXPRESSION_FIXED) && ((expression_list[i].value_type & TYPE_MASK) == TYPE_POLYGON)) {
                 int len = (expression_list[i].value_type) >> 8;
                 double *ptr = expression_list[i].value;
                 double x_temp, y_temp;
+                if (i != 19) SET_COLOR(cr, expression_list[i].color);
+                uint32_t color_pos = 0;
                 for (int p=0; p < len; p += 2*MAX_POLYGON_SIZE) {
-                    pt_x0 = SCALE_XK(ptr[p]);
-                    pt_y0 = SCALE_YK(ptr[p+1]);
+                    pt_x = SCALE_XK(ptr[p]);
+                    pt_y = SCALE_YK(ptr[p+1]);
+                    if (i == 19) SET_COLOR(cr, (expression_list[20].value+color_pos));
+                    color_pos += 3;
+                    cairo_move_to(cr, pt_x, pt_y);
                     for (int k=1; k < MAX_POLYGON_SIZE; k++) {
                         x_temp = ptr[p+2*k]; y_temp = ptr[p+2*k+1];
                         if ((x_temp+1 > x_temp) && (y_temp+1 > y_temp)) {
                             pt_x1 = SCALE_XK(x_temp);
                             pt_y1 = SCALE_YK(y_temp);
-                            LineAA((uint8_t*)data, WIDTH, HEIGHT, pt_x0, pt_y0, pt_x1, pt_y1, expression_list[i].color);
-                            pt_x0 = pt_x1;
-                            pt_y0 = pt_y1;
+                            //cairo_move_to(cr, pt_x, pt_y);
+                            cairo_line_to(cr, pt_x1, pt_y1);
+                            pt_x = pt_x1;
+                            pt_y = pt_y1;
                         }
                     }
-                    LineAA((uint8_t*)data, WIDTH, HEIGHT, pt_x0, pt_y0, SCALE_XK(ptr[p]), SCALE_YK(ptr[p+1]), expression_list[i].color);
+                    //cairo_move_to(cr, pt_x, pt_y);
+                    //cairo_line_to(cr, SCALE_XK(ptr[p]), SCALE_YK(ptr[p+1]));
+                    cairo_close_path(cr);
+                    cairo_stroke_preserve(cr);
+                    cairo_fill(cr);
                 }
+                //cairo_stroke(cr);
             } else {
-                draw_function_slow(expression_list[i].func, stack+60, expression_list[i].color);
+                draw_function_slow(expression_list[i].func, stack+60, expression_list[i].color, cr);
             }
         }
     }
-    t4 = clock();
-    if (data_pointer) {
-        pixbuf = gdk_pixbuf_new_from_data(data, 0, 0, 8, WIDTH, HEIGHT, 3*WIDTH, NULL, NULL);
-        gtk_image_set_from_pixbuf(data_pointer, pixbuf);
-    }
     t2 = clock();
-    g_print("Redraw took %luus, evaluation %luus, %d expressions, bounds %f %f %f %f\n", t2-t1, t4-t3, n_expr, window_x0, window_y0, window_x1, window_y1);
+    g_print("Redraw took %luus, %d expressions, bounds %f %f %f %f\n", t2-t1, n_expr, window_x0, window_y0, window_x1, window_y1);
+    return FALSE;
 }
 
 static gboolean scroll_callback (GtkWidget *event_box, GdkEventScroll *event, gpointer data_pointer) {
     //g_print ("Scrolled at %f, %f, direction %d, data_pointer: %p\n", event->x, event->y, event->direction, data_pointer);
-    double center_x = ((int32_t)(event->x)<<16)/xscale + window_x0;
-    double center_y = window_y1 - ((int32_t)(event->y)<<16)/yscale;
+    double center_x = ((int32_t)(event->x))/xscale + window_x0;
+    double center_y = window_y1 - ((int32_t)(event->y))/yscale;
     //g_print("center %f, %f, bounds %f, %f, %f, %f\n", center_x, center_x, window_x0, window_y0, window_x1, window_y1);
     uint8_t redraw = 0;
     // 1 = scroll out, 0 = scroll in
@@ -352,20 +272,20 @@ static gboolean scroll_callback (GtkWidget *event_box, GdkEventScroll *event, gp
     }
 
     if (redraw) {
-        redraw_all(data_pointer);
+        gtk_widget_queue_draw(data_pointer);
     }
     return TRUE;
 }
 
 static gboolean motion_callback(GtkWidget *event_box, GdkEventMotion *event, gpointer data_pointer) {
     if (click_state) {
-        double dx = (event->x - click_x)/xscale*(1<<16);
-        double dy = (click_y - event->y)/yscale*(1<<16);
+        double dx = (event->x - click_x)/xscale;
+        double dy = (click_y - event->y)/yscale;
         window_x0 -= dx; window_x1 -= dx; window_y0 -= dy; window_y1 -= dy;
         click_x = event->x;
         click_y = event->y;
         uint8_t color[4] = {255, 255, 255, 0};
-        redraw_all(data_pointer);
+        gtk_widget_queue_draw(data_pointer);
     }
     return TRUE;
 }
@@ -393,9 +313,21 @@ static gboolean timeout_callback(gpointer data_pointer) {
     if (from) {
         printf("evaluating from %p\n", from);
         evaluate_from(expression_list, n_expr, from, stack+60);
-        redraw_all(data_pointer);
+        gtk_widget_queue_draw(data_pointer);
         clock_t t4 = clock();
         printf("Total time: %luus\n", t4-t3);
+    }
+    if (run_ticker) return TRUE;
+    return FALSE;
+}
+
+static gboolean keypress_callback(GtkWidget *widget, GdkEventKey *event, gpointer data_pointer) {
+    printf("Event is %d\n", event->keyval);
+    if (event->keyval == 's') {
+        run_ticker = 1;
+        if (ticker_target >= 0) g_timeout_add(ticker_step, timeout_callback, data_pointer);
+    } else if (event->keyval == 'e') {
+        run_ticker = 0;
     }
     return TRUE;
 }
@@ -432,14 +364,15 @@ static void activate (GtkApplication *app, gpointer user_data) {
     gtk_widget_add_events(event_box, GDK_POINTER_MOTION_MASK);
     gtk_widget_add_events(event_box, GDK_BUTTON_RELEASE_MASK);
 
-    pixbuf = gdk_pixbuf_new_from_data(data, 0, 0, 8, WIDTH, HEIGHT, 3*WIDTH, NULL, NULL);
-    image = gtk_image_new_from_pixbuf(pixbuf);
-    if (ticker_target >= 0) g_timeout_add(ticker_step, timeout_callback, image);
-    g_signal_connect(G_OBJECT(event_box), "button_press_event", G_CALLBACK(button_press_callback), image);
-    g_signal_connect(G_OBJECT(event_box), "button_release_event", G_CALLBACK(button_release_callback), image);
-    g_signal_connect(G_OBJECT(event_box), "scroll_event", G_CALLBACK(scroll_callback), image);
-    g_signal_connect(G_OBJECT(event_box), "motion-notify-event", G_CALLBACK(motion_callback), image);
-    gtk_container_add(GTK_CONTAINER(event_box), image);
+    GtkWidget *drawing_area = gtk_drawing_area_new();
+    gtk_widget_set_size_request(drawing_area, WIDTH, HEIGHT);
+    g_signal_connect(G_OBJECT(event_box), "button_press_event", G_CALLBACK(button_press_callback), drawing_area);
+    g_signal_connect(G_OBJECT(event_box), "button_release_event", G_CALLBACK(button_release_callback), drawing_area);
+    g_signal_connect(G_OBJECT(event_box), "scroll_event", G_CALLBACK(scroll_callback), drawing_area);
+    g_signal_connect(G_OBJECT(event_box), "motion-notify-event", G_CALLBACK(motion_callback), drawing_area);
+    g_signal_connect(G_OBJECT(drawing_area), "draw", G_CALLBACK(redraw_all), drawing_area);
+    g_signal_connect(window, "key-press-event", G_CALLBACK(keypress_callback), drawing_area);
+    gtk_container_add(GTK_CONTAINER(event_box), drawing_area);
 
     gtk_widget_show_all(window);
 }
@@ -475,77 +408,10 @@ int main (int argc, char **argv) {
     }
 
     uint32_t type;
-    /*t1 = clock();
-    for (int i=0; i < 1; i++) 
-        type = expression_list[5].func->oper(expression_list[5].func, stack+60);
-    t2 = clock();
-    printf("result is ");
-    print_object(type, stack+60);
-    printf(", took %luus\n", t2 - t1);
-    print_object(expression_list[5].value_type, expression_list[5].value); printf("\n");
-
-    type = expression_list[6].func->oper(expression_list[6].func, stack+60);
-    printf("result is ");
-    print_object(type, stack+60);
-    printf("\n");*/
-
-    /*stack[60] = 1;
-    variable_list[0].pointer = stack+60;
-    variable_list[0].type = 1<<8;
-    printf("result is ");
-    print_object(expression_list[10].func->oper(expression_list[10].func, stack+61), stack+61);
-    printf(", expression flags %02x, value type %08x\n", expression_list[7].flags, expression_list[7].value_type);*/
-
-    //return 0;
-
-    /*t1 = clock();
-
-    for (int i=0; i < 500; i++) {
-        array[i] = i;
-    }
-    variable_list[0].pointer = array;
-    variable_list[0].type = 1000<<8;
-    printf("variable_list %p, %p, array %p, %p\n", &(variable_list[0].type), &(variable_list[0].pointer), array, &(array[1]));
-    function_list[0].oper(function_list, stack+10);
-    t2 = clock();
-    for (int i=0; i < 10; i++)
-        printf("Result is %f, %luus\n", stack[10+i], t2-t1);
-    return 0;*/
 
     GtkApplication *app;
     int status;
-    redraw_all(NULL);
 
-
-    /*t = t + dt;
-    draw_line(SCALE_X(xpp), SCALE_Y(ypp), SCALE_X(xp), SCALE_Y(yp));
-    while (t < 1) {
-        newdt = 0;
-        eval_func(t+dt, &x, &y);
-        est_radius(x, y, xp, yp, xpp, ypp, &radius, &speed);
-        newdt = fmin(RADIUS_SCALE * radius, MAX_ARC_LENGTH * dt / speed);
-        printf("t: %f -> (%f, %f), radius: %f, arc: %f, newdt: %f, dt: %f, det: %f\n", t, x, y, radius, speed, newdt, dt, (x-xp)*(yp-ypp) - (xp-xpp)*(y-yp));
-        if (newdt*1.5 < dt) {
-            printf("  retrying\n");
-            // Retry with a smaller step if the curvature would be too high with the current step.
-            dt = newdt;
-            continue;
-        }
-        //if (newdt > dt) dt = newdt;
-        draw_line(SCALE_X(xp), SCALE_Y(yp), SCALE_X(x), SCALE_Y(y));
-        t = t + dt;
-        dt = newdt;
-        xpp = xp; ypp = yp; xp = x; yp = y;
-    }*/
-
-
-    //draw_line(200, 200, 200, 250);
-    //draw_line(200, 250, 200, 300);
-    /*for (int i=0; i < 12; i++) {
-        double angle = i * 3.1415926 / 6;
-        draw_line(200, 200, 200 + (int)(50*cos(angle)), 200 + (int)(50*sin(angle)));
-        draw_line(200 + (int)(50*cos(angle)), 200 + (int)(50*sin(angle)), 200 + (int)(100*cos(angle)), 200 + (int)(100*sin(angle)));
-    }*/
 
     app = gtk_application_new("org.gtk.example", G_APPLICATION_FLAGS_NONE);
     g_signal_connect(app, "activate", G_CALLBACK (activate), NULL);

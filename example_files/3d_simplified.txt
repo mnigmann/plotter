@@ -16,5 +16,10 @@ X=\left[-s,...,s-1\right]d_{x}
 Y=\left[-s,...,s-1\right]d_{y}
 N_{0}=\left[\left(X\left[\operatorname{mod}\left(p,2s\right)+1\right],Y\left[\operatorname{floor}\left(\frac{p}{2s}+1\right)\right]\right)\operatorname{for}p=\left[0,...,4s^{2}-1\right]\right]
 D_{c}=D\left(N_{0}.x,N_{0}.y,F\left(N_{0}.x,N_{0}.y\right)\right)+D\left(N_{0}.x+d_{x},N_{0}.y,F\left(N_{0}.x+d_{x},N_{0}.y\right)\right)+D\left(N_{0}.x+d_{x},N_{0}.y+d_{y},F\left(N_{0}.x+d_{x},N_{0}.y+d_{y}\right)\right)+D\left(N_{0}.x,N_{0}.y+d_{y},F\left(N_{0}.x,N_{0}.y+d_{y}\right)\right)
-N=N_{0}
+N=\operatorname{sort}\left(N_{0},-D_{c}\right)
 \operatorname{polygon}\left(P\left(N.x,N.y,F\left(N.x,N.y\right)\right),P\left(N.x+d_{x},N.y,F\left(N.x+d_{x},N.y\right)\right),P\left(N.x+d_{x},N.y+d_{y},F\left(N.x+d_{x},N.y+d_{y}\right)\right),P\left(N.x,N.y+d_{y},F\left(N.x,N.y+d_{y}\right)\right)\right)
+\operatorname{rgb}\left(255I,255I,255I\right)
+\operatorname{rgb}\left(255\operatorname{max}\left(\frac{\operatorname{sort}\left(-D_{c}\right)}{\operatorname{max}\left(D_{c}\right)},0\right),255\operatorname{max}\left(\frac{-\operatorname{sort}\left(-D_{c}\right)}{\operatorname{max}\left(D_{c}\right)},0\right),0\right)
+M_{c}\left(x_{1},y_{1},z_{1},x_{2},y_{2},z_{2},x_{3},y_{3},z_{3}\right)=\frac{x_{3}\left(y_{1}z_{2}-z_{1}y_{2}\right)+y_{3}\left(z_{1}x_{2}-x_{1}z_{2}\right)+z_{3}\left(x_{1}y_{2}-y_{1}x_{2}\right)}{\left(\left(x_{1}^{2}+y_{1}^{2}+z_{1}^{2}\right)\left(x_{2}^{2}+y_{2}^{2}+z_{2}^{2}\right)\right)^{0.5}}
+L_{vec}=\left[-\sin\left(\alpha\right)\cos\left(\beta\right),-\cos\left(\alpha\right)\cos\left(\beta\right),\sin\left(\beta\right)\right]
+I=\operatorname{abs}\left(M_{c}\left(d_{x},0,F\left(N.x+d_{x},N.y\right)-F\left(N.x,N.y\right),0,d_{y},F\left(N.x,N.y+d_{y}\right)-F\left(N.x,N.y\right),L_{vec}\left[1\right],L_{vec}\left[2\right],L_{vec}\left[3\right]\right)\right)

@@ -26,13 +26,12 @@ const uint32_t step_table[8] = {1, 2, 3, 1, 1, MAX_POLYGON_SIZE*2, 0, 0};
 uint32_t func_general_one_arg(void *f, double *stackpos, double (*oper)(double)) {
     function *fs = (function*)f;
     function *arg = fs->first_arg;
-    uint32_t len;
+    uint32_t len, type;
     if (arg->oper) {
-        len = arg->oper(arg, stackpos)>>8;
-        if (len) {
-            for (int i=0; i < len; i++) stackpos[i] = oper(stackpos[i])*SIGN_BIT(fs);
-        } else stackpos[0] = oper(stackpos[0])*SIGN_BIT(fs);
-        return len<<8;
+        type = arg->oper(arg, stackpos);
+        len = type>>8;
+        for (int i=0; i < len; i++) stackpos[i] = oper(stackpos[i])*SIGN_BIT(fs);
+        return (len<<8) | (type & TYPE_LIST);
     } else {
         len = ((arg->value_type)&0x40 ? ((variable*)(arg->value))->type : arg->value_type)>>8;
         if (len) {
@@ -104,6 +103,11 @@ double mmod(double n, double d) {
     double i = fmod(n, d);
     if (n && ((n>0) ^ (d>0))) i += d;
     return i;
+}
+
+double mmax(double a, double b) {
+    if (a>b) return a;
+    return b;
 }
 
 double mlogfac(double x) {
@@ -185,6 +189,25 @@ uint32_t func_cosine(void *f, double *stackpos) {
 
 uint32_t func_factorial(void *f, double *stackpos) {
     return func_general_one_arg(f, stackpos, mfac);
+}
+
+uint32_t func_abs(void *f, double *stackpos) {
+    return func_general_one_arg(f, stackpos, fabs);
+}
+
+uint32_t func_max(void *f, double *stackpos) {
+    function *fs = (function*)f;
+    function *arg = fs->first_arg;
+    if (arg->next_arg) {
+        uint32_t type = func_general_two_args(f, stackpos, mmax);
+        return type;
+    }
+    
+    uint32_t type = arg->oper(arg, stackpos);
+    for (int i=1; i < (type>>8); i++) {
+        if (stackpos[i] > stackpos[0]) stackpos[0] = stackpos[i];
+    }
+    return (1<<8);
 }
 
 // The arctan function can have either one or two arguments
@@ -576,6 +599,50 @@ uint32_t func_polygon(void *f, double *stackpos) {
     return ((min_len*MAX_POLYGON_SIZE)<<8) | TYPE_LIST | TYPE_POLYGON;
 }
 
+uint32_t func_rgb(void *f, double *stackpos) {
+    function *fs = (function*)f;
+    function *arg = fs->first_arg;
+    
+    uint32_t r, g, b;
+    uint32_t rl, gl, bl;
+    uint32_t result_len = 0;
+    uint32_t result_type = 0;
+    uint32_t st=0, argtype, arglen;
+    argtype = arg->oper(arg, stackpos);
+    rl = argtype>>8;
+    result_len = rl;
+    st += rl;
+
+    arg = arg->next_arg;
+    g = st;
+    argtype = arg->oper(arg, stackpos+st);
+    gl = argtype>>8;
+    if ((argtype & TYPE_LIST) && ((result_type & TYPE_LIST) ? (gl < result_len) : 1)) {
+        result_len = gl;
+        result_type = argtype;
+    }
+    st += gl;
+
+    arg = arg->next_arg;
+    b = st;
+    argtype = arg->oper(arg, stackpos+st);
+    bl = argtype>>8;
+    if ((argtype & TYPE_LIST) && ((result_type & TYPE_LIST) ? (bl < result_len) : 1)) {
+        result_len = bl;
+        result_type = argtype;
+    }
+    st += bl;
+
+    double *temp = malloc(st*sizeof(double));
+    memcpy(temp, stackpos, st*sizeof(double));
+    for (int i=0; i < result_len; i++) {
+        stackpos[3*i] = temp[i%rl];
+        stackpos[3*i+1] = temp[g + i%gl];
+        stackpos[3*i+2] = temp[b + i%bl];
+    }
+    return ((3*result_len)<<8) | (result_type & TYPE_LIST) | TYPE_COLOR;
+}
+
 uint32_t func_ellipsis(void *f, double *stackpos) {
     return TYPE_ELLIPSIS;
 }
@@ -696,7 +763,7 @@ uint32_t func_extract_x(void *f, double *stackpos) {
         for (int j=0; j < arglen; j++) stackpos[j] = VALUE_LIST(arg, j);
     }
     //printf("extracting from type %08x\n", argtype);
-    if (!((argtype & TYPE_MASK) == TYPE_POINT)) FAIL("ERROR: cannot access x-coordinate of type %08x\n", argtype);
+    if (!((argtype & TYPE_MASK) == TYPE_POINT)) FAIL("ERROR: cannot access x-coordinate of type %08x, block %p\n", argtype, fs);
     for (int i=0; i < arglen; i += 2) {
         stackpos[i>>1] = stackpos[i];
     }
@@ -1002,5 +1069,55 @@ uint32_t func_conditional(void *f, double *stackpos) {
     for (int i=0; i < result_len; i++) stackpos[i] = result_ptr[i]*SIGN_BIT(fs);
     //exit(EXIT_FAILURE);
     return (result_len<<8) | (result_type & 0xff);
+}
+
+int compare_doubles(const void *a, const void *b) {
+    double arg1 = *(const double*)a;
+    double arg2 = *(const double*)b;
+    return (arg1 > arg2) - (arg1 < arg2);
+}
+
+int compare_doubles_indirect(void *data, const void *a, const void *b) {
+    double *data_d = (double*)data;
+    double arg1 = data_d[(int)(*(double*)a)];
+    double arg2 = data_d[(int)(*(double*)b)];
+    return (arg1 > arg2) - (arg1 < arg2);
+}
+
+uint32_t func_sort(void *f, double *stackpos) {
+    // [7,3,5,8,2,1,5,6,8] sorted by [1,7,4,2,6,3]
+    // Indices are [0, 3, 5, 2, 4, 1]
+    function *fs = (function*)f;
+    function *arg = fs->first_arg;
+    uint32_t argtype, idxlen, arglen, result_len, argsize;
+    if (arg->next_arg) {
+        argtype = arg->next_arg->oper(arg->next_arg, stackpos);
+        idxlen = argtype>>8;
+        for (int i=0; i < idxlen; i++) {
+            stackpos[idxlen+i] = stackpos[i];
+            stackpos[i] = i;
+        }
+        qsort_r(stackpos, idxlen, sizeof(double), stackpos+idxlen, compare_doubles_indirect);
+        argtype = arg->oper(arg, stackpos+idxlen);
+        argsize = argtype>>8;
+        uint8_t step = GET_STEP(argtype);
+        arglen = argsize/step;
+        int j=0;
+        for (int i=0; i < idxlen; i++) {
+            if (stackpos[i] < arglen) {
+                memcpy(stackpos+idxlen+argsize+j, stackpos+idxlen+step*((int)stackpos[i]), step*sizeof(double));
+                j += step;
+            }
+        }
+        for (int i=0; i < j; i++) stackpos[i] = stackpos[idxlen+argsize+i]*SIGN_BIT(fs);
+        return (j<<8) | (argtype & 0xff);
+    } else {
+        // Single-argument sort
+        argtype = arg->oper(arg, stackpos);
+        if (!IS_TYPE(argtype, TYPE_DOUBLE)) FAIL("ERROR: can only sort list of doubles\n");
+        qsort(stackpos, argtype>>8, sizeof(double), compare_doubles);
+        for (int i=0; i < (argtype>>8); i++) stackpos[i] *= SIGN_BIT(fs);
+        return argtype;
+    }
 }
 

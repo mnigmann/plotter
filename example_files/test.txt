@@ -1,0 +1,12 @@
+b=a^{2}+a
+a=4
+c=a+b
+d=\left[1,...,4\right]
+f\left(x,y\right)=\frac{x}{y}
+f\left(d,c\right)
+d^{d}\left[2,3,7\right]
+\left[\left(7,8\right),\left(2,-3\right)\right]
+w=10^{u}-u
+\sin\left(x\right)
+a\to a+1
+\operatorname{distance}\left(\left(4,7\right),\left(19,-3\right)\right)
