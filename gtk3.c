@@ -5,7 +5,7 @@
 #include <string.h>
 #include "parse.h"
 #include "functions.h"
-#include "lines.h"
+#include "linalg_functions.h"
 #include "config.h"
 
 #define SCALE_X(v) ((uint16_t)(250*(1+v)))
@@ -72,7 +72,7 @@ void est_radius(double x0, double y0, double x1, double y1, double x2, double y2
     *speed = sqrt(d01);
 }
 
-void draw_function(function *func, double *stackpos, uint8_t *color) {
+/*void draw_function(function *func, double *stackpos, uint8_t *color) {
     double x, y, xp, yp, xpp, ypp, radius, speed, dt, newdt;
     clock_t t1, t2;
     t1 = clock();
@@ -93,11 +93,11 @@ void draw_function(function *func, double *stackpos, uint8_t *color) {
     while (t < window_x1) {
         if (dt < minstep_x) dt = minstep_x;
         eval_func(t+dt, &x, &y, func, stackpos);
-        /*if (fabs(250*250*((x-xp)*(yp-ypp) - (xp-xpp)*(y-yp))) > 10) {
-            printf("retrying\n");
-            dt = dt/2;
-            continue;
-        }*/
+        //if (fabs(250*250*((x-xp)*(yp-ypp) - (xp-xpp)*(y-yp))) > 10) {
+        //    printf("retrying\n");
+        //    dt = dt/2;
+        //    continue;
+        //}
         t = t + dt;
         //draw_line(SCALE_X(xp), SCALE_Y(yp), SCALE_X(x), SCALE_Y(y));
         LineAA((uint8_t*)data, WIDTH, HEIGHT, SCALE_XK(xp), SCALE_YK(yp), SCALE_XK(x), SCALE_YK(y), color);
@@ -111,7 +111,7 @@ void draw_function(function *func, double *stackpos, uint8_t *color) {
 
     t2 = clock();
     g_print("Drawing took %lu, nfev: %d\n", t2-t1, nfev);
-}
+}*/
 
 void draw_function_slow(function *func, double *stackpos, uint8_t *color, cairo_t *cr) {
     SET_COLOR(cr, color);
@@ -392,20 +392,12 @@ int main (int argc, char **argv) {
     
     uint32_t n_func = 0;
     uint32_t n_var = 0;
-    top_expr = parse_file(argv[1], function_list, stack, variable_list, stringbuf, expression_list, &n_func, &n_var, &n_expr);
+    n_expr = load_file(argv[1], expression_list);
+    top_expr = parse_file(function_list, stack, variable_list, stringbuf, expression_list, &n_func, &n_var, n_expr);
     printf("Parsing completed. %d function blocks, %d variables, %d expressions\n", n_func, n_var, n_expr);
     ticker_target = (int)parse_double(argv[2]);
     ticker_step = (int)parse_double(argv[3]);
     printf("Expression %d will be evaluated every %d milliseconds\n", ticker_target, ticker_step);
-
-    for (int i=0; i < n_expr; i++) {
-        if ((i%6+1)&0x01) expression_list[i].color[0] = 255;
-        else expression_list[i].color[0] = 0;
-        if ((i%6+1)&0x02) expression_list[i].color[1] = 255;
-        else expression_list[i].color[1] = 0;
-        if ((i%6+1)&0x04) expression_list[i].color[2] = 255;
-        else expression_list[i].color[2] = 0;
-    }
 
     uint32_t type;
 

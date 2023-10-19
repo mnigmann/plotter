@@ -1,0 +1,6 @@
+f\left(z\right)=\left[z\left[1\right]^{2}+2z\left[2\right]^{2}-22,2z\left[1\right]^{2}+z\left[2\right]^{2}-17\right]
+J\left(z\right)=\left[2z\left[1\right],4z\left[1\right],4z\left[2\right],2z\left[2\right]\right]
+z_{0}=\left[10,10\right]
+b=f\left(z_{0}\right)
+a=J\left(z_{0}\right)
+z_{0}\to z_{0}-\operatorname{solve}\left(a,b\right)

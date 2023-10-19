@@ -4,7 +4,18 @@
 #include <stdlib.h>
 #include "parse.h"
 #include "functions.h"
+#include "linalg_functions.h"
 #include <math.h>
+
+#define N_FUNCTIONS 13
+const char *function_names[N_FUNCTIONS] = {
+    "arctan",       "cos",          "sin",          "mod",          "floor",        "polygon",      "total",        "distance",
+    "rgb",          "max",          "abs",          "sort",         "solve"
+};
+uint32_t (*function_pointers[N_FUNCTIONS])(void*, double*) = {
+    func_arctan,    func_cosine,    func_sine,      func_mod,       func_floor,     func_polygon,   func_total,     func_distance,
+    func_rgb,       func_max,       func_abs,       func_sort,      func_solve
+};
 
 int extract_braces(char* latex, int start) {
     int end = strlen(latex);
@@ -271,7 +282,7 @@ void evaluate_from(expression *expression_list, int n_expr, expression *top_expr
     //printf("stack_size is %d with value %p, stack %p\n", stack_size, expr->value, stack);
     double *ptr;
     while (expr) {
-        //printf("on expression %p, stack_size %d\n", expr, stack_size);
+        //printf("on expression %p, variable %p, function %p, flags %02x\n", expr, expr->var, expr->func, expr->flags);
         if ((expr->func) && (expr->var) && !(expr->var->flags & VARIABLE_FUNCTION) && ((expr->flags & EXPRESSION_FIXED) || !(expr->flags & EXPRESSION_PLOTTABLE))) {
             printf("evaluating variable %s, expression %p (%03ld), variable block %p, function block %p, old pointer %p\n", expr->var->name, expr, expr-expression_list+1, expr->var, expr->func, expr->value);
             type = (expr->func->oper(expr->func, stack));
@@ -700,7 +711,25 @@ int parse_latex_rec(char *latex, int end, function *function_list, double *stack
                 function_list[last_pos+1].value = variable_list + (*var_size-1);
                 printf("parsing %.*s done, func_pos %d\n", end, latex, func_pos);
                 return func_pos;
-            } else if ((cmd_len == 12) && (cmd_start+17 < end) && (strncmp(latex+cmd_start, "operatorname{mod}", cmd_len+5) == 0)) {
+            } else if ((cmd_len == 12) && (strncmp(latex+cmd_start, "operatorname", cmd_len) == 0)) {
+                arg1_end = extract_braces(latex, cmd_start+12);
+                oper = NULL;
+                for (int j=0; j < N_FUNCTIONS; j++) {
+                    if ((arg1_end-cmd_start-13 == strlen(function_names[j])) && (strncmp(function_names[j], latex+cmd_start+13, arg1_end-cmd_start-13) == 0)) {
+                        oper = function_pointers[j];
+                        break;
+                    }
+                }
+                if (!oper) {
+                    printf("ERROR: unrecognized function %.*s\n", arg1_end-cmd_start-13, latex+cmd_start+13);
+                    exit(EXIT_FAILURE);
+                }
+                i = arg1_end+1;
+                arg1_start = i+6;
+                arg1_end = extract_parenthetical(latex, i);
+                i = arg1_end;
+                arg1_end -= 6;
+/*            } else if ((cmd_len == 12) && (cmd_start+17 < end) && (strncmp(latex+cmd_start, "operatorname{mod}", cmd_len+5) == 0)) {
                 cmd_end += 5;
                 arg1_end = extract_parenthetical(latex, cmd_end);
                 printf("multiply mod %.*s\n", arg1_end - cmd_end - 12, latex+cmd_end+6);
@@ -771,7 +800,7 @@ int parse_latex_rec(char *latex, int end, function *function_list, double *stack
                 i = arg1_end;
                 arg1_end -= 6;
                 arg1_start = cmd_end + 6;
-                oper = func_sort;
+                oper = func_sort;*/
             } else if (((i == 0) || ((i >= 5) && (strncmp(latex+i-5, "\\cdot", 5) == 0))) && (cmd_len == 4) && (strncmp(latex+cmd_start, "left[", cmd_len+1) == 0)) {
                 // Brackets can only be interpreted as a list if they are the first thing in the expression
                 // or if they follow a \cdot.
@@ -1152,9 +1181,39 @@ uint8_t varncmp(char *varname, char *target, uint32_t len) {
     return (strncmp(varname, target, len) == 0) && (strlen(varname) == len);
 }
 
-expression* parse_file(char *fname, function *function_list, double *stack, variable *variable_list, char *stringbuf, expression *expression_list, uint32_t *n_func, uint32_t *n_var, uint32_t *n_expr) {
-    FILE *fp;
+uint32_t load_file(char *fname, expression *expression_list) {
+    FILE *fp = fopen(fname, "r");
+    if (fp == NULL) return 0;
+    uint32_t n_expr = 0;
+    char *temp;
     char *line=NULL;
+    ssize_t read;
+    size_t len=0;
+    while ((read = getline(&line, &len, fp)) != -1) {
+        if (read <= 1) continue;
+        if (line[0] == '#') continue;
+        if (line[read-1] == '\n') {
+            line[read-1] = 0;
+            read--;
+        }
+        printf("Loaded expression %s\n", line);
+        temp = malloc((read+1)*sizeof(char));
+        strcpy(temp, line);
+        expression_list[n_expr] = new_expression(NULL, NULL, NULL, 0, 0);
+        expression_list[n_expr].def = temp;
+        if ((n_expr%7)&0x01) expression_list[n_expr].color[0] = 255;
+        else expression_list[n_expr].color[0] = 0;
+        if ((n_expr%7)&0x02) expression_list[n_expr].color[1] = 255;
+        else expression_list[n_expr].color[1] = 0;
+        if ((n_expr%7)&0x04) expression_list[n_expr].color[2] = 255;
+        else expression_list[n_expr].color[2] = 0;
+        n_expr++;
+    }
+    return n_expr;
+}
+
+expression* parse_file(function *function_list, double *stack, variable *variable_list, char *stringbuf, expression *expression_list, uint32_t *n_func, uint32_t *n_var, uint32_t n_expr) {
+    FILE *fp;
     size_t len=0;
     ssize_t read;
     int i;
@@ -1168,20 +1227,16 @@ expression* parse_file(char *fname, function *function_list, double *stack, vari
     uint8_t var_alpha;
     uint8_t var_beta;
     uint8_t flags=0;
-    printf("variable_list: %p\nexpression_list: %p\nstack: %p\nstringpos: %p\n", variable_list, expression_list, stack, stringpos);
+    printf("variable_list: %p\nexpression_list: %p\nstack: %p\nstringpos: %p\nn_expr: %d\n", variable_list, expression_list, stack, stringpos, n_expr);
 
-    printf("Reading file \"%s\"\n", fname);
-    fp = fopen(fname, "r");
-    if (fp == NULL) return NULL;
+    char *line;
+    for (uint32_t expr_idx = 0; expr_idx < n_expr; expr_idx++) {
+        line = expression_list[expr_idx].def;
+        read = strlen(line);
+        exprpos = expression_list+expr_idx;
 
-    while ((read = getline(&line, &len, fp)) != -1) {
         printf("Found expression of length %zd\n", read);
-        if (read <= 1) continue;
-        if (line[0] == '#') continue;
-        printf("    %s", line);
-        line[read-1] = 0;
-        exprpos[0] = new_expression(NULL, NULL, NULL, 0, 0);
-        printf("Putting in position %p (%03ld)\n", exprpos, exprpos-expression_list+1);
+        printf("    %s\n", line);
         i = 1;
         var_alpha = ((read >= 6) && (strncmp(line, "\\alpha", 6) == 0));
         var_beta = ((read >= 5) && (strncmp(line, "\\beta", 5) == 0));
@@ -1200,10 +1255,8 @@ expression* parse_file(char *fname, function *function_list, double *stack, vari
                 // If no equals sign is found, then it is not a definition. In that case, continue
                 // and increment the expression list counter
                 if (line[arg+1] == '=') printf("    Found function %.*s with args %.*s\n", i, line, arg+1-i, line+i);
-                else {
-                    exprpos++;
-                    continue;
-                }
+                else continue;
+                
                 // Check if the function has already been defined
                 for (int j=0; variable_list+j < varpos; j++) {
                     if (strcmp(variable_list[j].name, line) == 0) {
@@ -1249,25 +1302,19 @@ expression* parse_file(char *fname, function *function_list, double *stack, vari
                 varpos++;
                 stringpos += i+1;
                 i++;
-            } else {
-                exprpos++;
-                continue;
-            }
+            } else continue;
             // In either case (variable or function definition, we need to finish up the expression struct.
             // This involves extracting the variables used in the definition. However, we can't do this
             // until we parse all of the expressions. Thus, we store the index to the expression struct.
             exprpos->expr_begin = i;
 
         }
-        exprpos++;
     }
     printf("loop done, %p, %p\n", variable_list->name, stringpos);
     for (i=0; variable_list+i < varpos; i++)
         printf("%s variable pointer at %p, points to %p, type %08X\n", variable_list[i].name, variable_list+i, variable_list[i].pointer, variable_list[i].type);
-    fseek(fp, 0, SEEK_SET);
 
-    *n_expr = exprpos - expression_list;
-    printf("A total of %d expressions found\n", *n_expr);
+    printf("A total of %d expressions found\n", n_expr);
     exprpos = expression_list;
     int subscript;
     expression *deptable[300];
@@ -1279,10 +1326,11 @@ expression* parse_file(char *fname, function *function_list, double *stack, vari
     // Pointer to any new variable created as the input to a particular expression.
     // For example, u in w=10^{u}
     variable *local_variable = NULL;
-    while ((read = getline(&line, &len, fp)) != -1) {
-        if (read <= 1) continue;
-        if (line[0] == '#') continue;
-        if (line[read-1] == '\n') line[read-1] = 0;
+    for (uint32_t expr_idx=0; expr_idx < n_expr; expr_idx++) {
+        line = expression_list[expr_idx].def;
+        read = strlen(line);
+        exprpos = expression_list + expr_idx;
+        
         i = exprpos->expr_begin;
         exprpos->dependencies = deptable+deptable_ofs;
         exprpos->flags |= EXPRESSION_FIXED;
@@ -1320,7 +1368,7 @@ expression* parse_file(char *fname, function *function_list, double *stack, vari
                         // If the dependency has not already been added, search for the variable in the
                         // expression table. Note that this will skip variables that are not defined by the
                         // user. For example, it will miss x and y as well as function arguments
-                        for (int k=0; k < *n_expr; k++) {
+                        for (int k=0; k < n_expr; k++) {
                             if ((expression_list[k].var) && (varncmp((expression_list[k].var)->name, line+j, subscript-j))) {
                                 printf("    found at position %d\n", k);
                                 deptable[deptable_ofs] = expression_list+k;
@@ -1397,8 +1445,8 @@ expression* parse_file(char *fname, function *function_list, double *stack, vari
         }
         
         if (local_variable) local_variable->flags &= (~VARIABLE_IN_SCOPE);
-
-        exprpos++;
+        
+        free(exprpos->def);
     }
 
     // Connect all of the function calls to their definitions instead of their declarations
@@ -1417,7 +1465,7 @@ expression* parse_file(char *fname, function *function_list, double *stack, vari
     }
 
     // Print the expression table
-    for (i=0; expression_list+i < exprpos; i++)
+    for (i=0; i < n_expr; i++)
         printf("expression pointer at %p, function %p, variable %p, flags %02x, begin %d, dep %p, num %d\n", expression_list+i, expression_list[i].func, expression_list[i].var, expression_list[i].flags, expression_list[i].expr_begin, expression_list[i].dependencies, expression_list[i].num_dependencies);
     
     // Print the function table
@@ -1429,16 +1477,16 @@ expression* parse_file(char *fname, function *function_list, double *stack, vari
     // Use topological sort to determine the order in which variable and function assignments must be evaluated.
     for (i=0; i < deptable_ofs; i++) 
         deptable[i]->num_dependents++;
-    for (i=0; expression_list+i < exprpos; i++) {
+    for (i=0; i < n_expr; i++) {
         if (expression_list[i].num_dependencies > 0) {
             printf("%p (%03d)\n", expression_list+i, i+1);
             for (int j=0; j < expression_list[i].num_dependencies; j++) printf("    %p (%03ld)\n", expression_list[i].dependencies[j], expression_list[i].dependencies[j]-expression_list+1);
         }
     }
-    for (i=0; expression_list+i < exprpos; i++) {
+    for (i=0; i < n_expr; i++) {
         printf("%d expressions depend on %p\n", expression_list[i].num_dependents, expression_list+i);
     }
-    expression *top_expr = topological_sort(expression_list, *n_expr);
+    expression *top_expr = topological_sort(expression_list, n_expr);
     printf("Top is %p\n", top_expr);
     expression *expr = top_expr;
     i=0;
@@ -1454,7 +1502,7 @@ expression* parse_file(char *fname, function *function_list, double *stack, vari
     printf("\n");
     
     // Evaluate all variables in accordance with the topological ordering
-    evaluate_from(expression_list, exprpos-expression_list, top_expr, stack+stack_size);
+    evaluate_from(expression_list, n_expr, top_expr, stack+stack_size);
 
 
     for (i=0; variable_list+i < varpos; i++)
@@ -1463,9 +1511,6 @@ expression* parse_file(char *fname, function *function_list, double *stack, vari
     *n_func = func_pos;
     *n_var = varpos - variable_list;
 
-    // Close the file
-    fclose(fp);
-    if (line) free(line);
     return top_expr;
 }
 
