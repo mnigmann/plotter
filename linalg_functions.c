@@ -4,11 +4,13 @@
 #include <stdint.h>
 #include <stdio.h>
 #include <lapack.h>
+#include <complex.h>
 
 #define SIGN_BIT(v) (((v->value_type)&0x80) ? -1 : 1)
 
 #define FAIL(...) {printf(__VA_ARGS__); exit(EXIT_FAILURE);}
 #define IS_TYPE(type, ref) (((type) & TYPE_MASK) == (ref))
+#define CSPLIT(z) creal(z),cimag(z)
 
 uint32_t func_solve(void *f, double *stackpos) {
     function *fs = (function*)f;
@@ -68,3 +70,78 @@ uint32_t func_solve(void *f, double *stackpos) {
     }
     return (nrhs*acols)<<8;
 }
+
+uint32_t isqrt(uint32_t n) {
+    uint32_t x = n;
+    uint32_t c = 0;
+    uint32_t d = 1<<30;
+    while (d > n) d>>=2;
+    while (d != 0) {
+        if (x >= c+d) {
+            x -= c+d;
+            c = (c>>1) + d;
+        } else {
+            c >>= 1;
+        }
+        d >>= 2;
+    }
+    return c;
+}
+
+uint32_t func_eigvals(void *f, double *stackpos) {
+    function *fs = (function*)f;
+    function *arg = fs->first_arg;
+    
+    uint32_t argtype, alen, blen;
+    argtype = arg->oper(arg, stackpos);
+    alen = argtype>>8;
+    if (!IS_TYPE(argtype, TYPE_POINT)) {
+        // Real matrix provided. Convert to complex
+        for (int i=alen-1; i>=0; i--) {
+            stackpos[2*i+1] = 0;
+            stackpos[2*i] = stackpos[i];
+        }
+        alen = alen * 2;
+    }
+    int32_t n = isqrt(alen / 2);
+    if (n*n*2 != alen) FAIL("ERROR: matrix must be square to compute eigenvalues\n");
+    arg = arg->next_arg;
+    int info, lwork=-1, lda=n, ldb=n, ldv=1;
+    if (arg) {
+        // Two matrices provided, compute generalized eigenvalues
+        argtype = arg->oper(arg, stackpos+alen);
+        blen = argtype>>8;
+        if (!IS_TYPE(argtype, TYPE_POINT)) {
+            // Real matrix provided. Convert to complex
+            for (int i=blen-1; i>=0; i--) {
+                stackpos[alen+2*i+1] = 0;
+                stackpos[alen+2*i] = stackpos[alen+i];
+            }
+            blen = blen * 2;
+        }
+        if (alen != blen) FAIL("ERROR: matrices must have the same dimension to compute generalized eigenvalues\n");
+        
+        lapack_complex_double *result = (lapack_complex_double*)(stackpos+alen+blen);
+        LAPACK_zggev("N", "N", &n, (lapack_complex_double*)stackpos, &n, (lapack_complex_double*)(stackpos+alen), &n, result, result+n, NULL, &ldv, NULL, &ldv, result+6*n, &lwork, (double*)(result+2*n), &info);
+        lwork = creal(result[6*n]);
+        LAPACK_zggev("N", "N", &n, (lapack_complex_double*)stackpos, &n, (lapack_complex_double*)(stackpos+alen), &n, result, result+n, NULL, &ldv, NULL, &ldv, result+6*n, &lwork, (double*)(result+2*n), &info);
+        if (info != 0) printf("WARNING: zggev produced non-zero error code %d\n", info);
+        lapack_complex_double lambda;
+        for (int i=0; i < n; i++) {
+            lambda = result[i]/result[i+n];
+            printf("eigval is %e%+ei, %e%+ei, %e%+ei\n", CSPLIT(result[i]), CSPLIT(result[i+n]), CSPLIT(lambda));
+            stackpos[2*i] = creal(lambda)*SIGN_BIT(fs);
+            stackpos[2*i+1] = cimag(lambda)*SIGN_BIT(fs);
+        }
+        return (n<<9) | TYPE_POINT | TYPE_LIST;
+    }
+    
+    lapack_complex_double *result = (lapack_complex_double*)(stackpos+alen);
+    LAPACK_zgeev("N", "N", &n, (lapack_complex_double*)stackpos, &lda, result, NULL, &ldv, NULL, &ldv, result+2*n, &lwork, (double*)(result+n), &info);
+    lwork = creal(result[2*n]);
+    LAPACK_zgeev("N", "N", &n, (lapack_complex_double*)stackpos, &lda, result, NULL, &ldv, NULL, &ldv, result+2*n, &lwork, (double*)(result+n), &info);
+    for (int i=0; i < 2*n; i++) stackpos[i] = ((double*)result)[i]*SIGN_BIT(fs);
+    return (n<<9) | TYPE_POINT;
+}
+
+

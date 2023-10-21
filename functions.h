@@ -22,6 +22,7 @@ uint32_t func_max(void *f, double *stackpos);
 uint32_t func_sine(void *f, double *stackpos);
 uint32_t func_cosine(void *f, double *stackpos);
 uint32_t func_arctan(void *f, double *stackpos);
+uint32_t func_log(void *f, double *stackpos);
 uint32_t func_factorial(void *f, double *stackpos);
 uint32_t func_abs(void *f, double *stackpos);
 uint32_t func_add(void *f, double *stackpos);
@@ -38,14 +39,18 @@ uint32_t func_ellipsis(void *f, double *stackpos);
 
 uint32_t func_for(void *f, double *stackpos);
 uint32_t func_equals(void *f, double *stackpos);
+uint32_t func_greater(void *f, double *stackpos);
 
 uint32_t func_extract_x(void *f, double *stackpos);
 uint32_t func_extract_y(void *f, double *stackpos);
 uint32_t func_assign(void *f, double *stackpos);
 uint32_t func_sum(void *f, double *stackpos);
+uint32_t func_prod(void *f, double *stackpos);
 uint32_t func_total(void *f, double *stackpos);
 uint32_t func_distance(void *f, double *stackpos);
 uint32_t func_conditional(void *f, double *stackpos);
 uint32_t func_sort(void *f, double *stackpos);
+uint32_t func_join(void *f, double *stackpos);
+uint32_t func_length(void *f, double *stackpos);
 
 #endif

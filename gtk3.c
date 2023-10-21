@@ -34,8 +34,8 @@ double xscale;
 double yscale;
 uint16_t nfev = 0;
 
-function function_list[500];
-variable variable_list[50];
+function function_list[1024];
+variable variable_list[128];
 expression expression_list[100];
 double stack[65536];
 char stringbuf[500];
@@ -383,6 +383,8 @@ int main (int argc, char **argv) {
     printf("First stack positions %p, %p\n", stack, stack+1);
     variable_list[0] = new_variable("x", 0, VARIABLE_IN_SCOPE, NULL);
     variable_list[1] = new_variable("y", 0, VARIABLE_IN_SCOPE, NULL);
+    double pi = M_PI;
+    variable_list[2] = new_variable("\\pi", 1<<8, VARIABLE_IN_SCOPE, &pi);
     //parse_latex("\\frac{\\arctan\\left(\\frac{0.1}{x}\\right)}{2}", function_list);
     //int stack_size = 0;
     //parse_latex("2x+x^{4-x}\\cos\\left(4+x\\right)-\\left(7+3\\right)", function_list, stack, variable_list, &stack_size);

@@ -7,14 +7,14 @@
 #include "linalg_functions.h"
 #include <math.h>
 
-#define N_FUNCTIONS 13
+#define N_FUNCTIONS 16
 const char *function_names[N_FUNCTIONS] = {
     "arctan",       "cos",          "sin",          "mod",          "floor",        "polygon",      "total",        "distance",
-    "rgb",          "max",          "abs",          "sort",         "solve"
+    "rgb",          "max",          "abs",          "sort",         "join",         "length",       "solve",        "eigvals"
 };
 uint32_t (*function_pointers[N_FUNCTIONS])(void*, double*) = {
     func_arctan,    func_cosine,    func_sine,      func_mod,       func_floor,     func_polygon,   func_total,     func_distance,
-    func_rgb,       func_max,       func_abs,       func_sort,      func_solve
+    func_rgb,       func_max,       func_abs,       func_sort,      func_join,      func_length,    func_solve,     func_eigvals
 };
 
 int extract_braces(char* latex, int start) {
@@ -193,8 +193,8 @@ void print_object_short(uint32_t type, double *pos) {
     uint32_t len = type >> 8;
     if ((type & TYPE_MASK) == TYPE_POINT) {
         for (int i=0; i < len; i += 2) {
-            if (i+2 < len) printf("(%f, %f), ", pos[i], pos[i+1]);
-            else printf("(%f, %f)", pos[i], pos[i+1]);
+            if (i+2 < len) printf("(%0.12f, %0.12f), ", pos[i], pos[i+1]);
+            else printf("(%0.12f, %0.12f)", pos[i], pos[i+1]);
         }
     } else if ((type & TYPE_MASK) == TYPE_COLOR) {
         for (int i=0; i < len; i += 3) {
@@ -282,9 +282,9 @@ void evaluate_from(expression *expression_list, int n_expr, expression *top_expr
     //printf("stack_size is %d with value %p, stack %p\n", stack_size, expr->value, stack);
     double *ptr;
     while (expr) {
-        //printf("on expression %p, variable %p, function %p, flags %02x\n", expr, expr->var, expr->func, expr->flags);
+        printf("on expression %p (%03ld), variable %p, function %p, flags %02x\n", expr, expr-expression_list+1, expr->var, expr->func, expr->flags);
         if ((expr->func) && (expr->var) && !(expr->var->flags & VARIABLE_FUNCTION) && ((expr->flags & EXPRESSION_FIXED) || !(expr->flags & EXPRESSION_PLOTTABLE))) {
-            printf("evaluating variable %s, expression %p (%03ld), variable block %p, function block %p, old pointer %p\n", expr->var->name, expr, expr-expression_list+1, expr->var, expr->func, expr->value);
+            printf("evaluating variable %s, expression %p (%03ld), variable block %p, function block %p, old pointer %p, stack %p\n", expr->var->name, expr, expr-expression_list+1, expr->var, expr->func, expr->value, stack);
             type = (expr->func->oper(expr->func, stack));
             // If the siz changes, reallocate. Otherwise, use the same memory
             if (((expr->value_type) >> 8) != (type >> 8))
@@ -486,6 +486,19 @@ int parse_latex_rec(char *latex, int end, function *function_list, double *stack
         func_pos += PARSE_LATEX_REC(latex+index_equals, end-index_equals, function_list+func_pos);
         return func_pos;
     }
+    n_braces = 0;
+    n_leftright = 0;
+    index_equals = get_next_match(latex, 0, end, '>');
+    if (index_equals >= 0) {
+        function_list[0] = new_function(func_greater, NULL, function_list+1);
+        func_pos++;
+        func_pos += PARSE_LATEX_REC(latex, index_equals, function_list+func_pos);
+        function_list[1].next_arg = function_list + func_pos;
+        index_equals++;
+        if (latex[index_equals] == ' ') index_equals++;
+        func_pos += PARSE_LATEX_REC(latex+index_equals, end-index_equals, function_list+func_pos);
+        return func_pos;
+    }
 
     // Decompose actions
     for (int i=0; i < end; i++) {
@@ -664,6 +677,13 @@ int parse_latex_rec(char *latex, int end, function *function_list, double *stack
                 arg1_end -= 6;
                 arg1_start = cmd_end+6;
                 oper = func_arctan;
+            } else if ((cmd_len == 2) && (strncmp(latex+cmd_start, "ln", cmd_len)==0)) {
+                arg1_end = extract_parenthetical(latex, cmd_end);
+                printf("multiply ln %.*s\n", arg1_end - cmd_end - 12, latex+cmd_end+6);
+                i = arg1_end;
+                arg1_end -= 6;
+                arg1_start = cmd_end + 6;
+                oper = func_log;
             } else if ((cmd_len == 3) && (strncmp(latex+cmd_start, "cos", cmd_len)==0)) {
                 arg1_end = extract_parenthetical(latex, cmd_end);
                 printf("multiply cosine %.*s\n", arg1_end - cmd_end - 12, latex+cmd_end+6);
@@ -678,7 +698,7 @@ int parse_latex_rec(char *latex, int end, function *function_list, double *stack
                 arg1_end -= 6;
                 arg1_start = cmd_end + 6;
                 oper = func_sine;
-            } else if ((cmd_len == 3) && (strncmp(latex+cmd_start, "sum", cmd_len)==0)) {
+            } else if (((strncmp(latex+cmd_start, "sum", cmd_len) == 0) && (cmd_len == 3)) || ((strncmp(latex+cmd_start, "prod", cmd_len) == 0) && (cmd_len == 4))) {
                 // Sums have three parts: a definition, an end point, and an expression to be summed
                 // We assume that the entire remaining expression is the sum
                 i = cmd_end;
@@ -690,7 +710,8 @@ int parse_latex_rec(char *latex, int end, function *function_list, double *stack
                 printf("Initial value is %.*s\n", subscript-arg1_end-1, latex+arg1_end+1);
                 printf("Final value is %.*s\n", superscript-subscript-3, latex+subscript+3);
                 last_pos = func_pos;
-                function_list[func_pos] = new_function(func_sum, NULL, function_list+func_pos+1);
+                if (strncmp(latex+cmd_start, "sum", cmd_len) == 0) function_list[func_pos] = new_function(func_sum, NULL, function_list+func_pos+1);
+                else function_list[func_pos] = new_function(func_prod, NULL, function_list+func_pos+1);
                 func_pos++;
                 function_list[func_pos] = new_value(NULL, 0x40, function_list+func_pos+1);
                 func_pos++;
@@ -1433,7 +1454,24 @@ expression* parse_file(function *function_list, double *stack, variable *variabl
             exprpos->func = function_list+func_pos;
             int var_size = varpos - variable_list;
             int string_size = stringpos - stringbuf;
+            last_pos = func_pos;
             func_pos += parse_latex_rec(line+i, read-i, function_list+func_pos, stack, variable_list, stringbuf, &stack_size, &var_size, &string_size, &flags);
+            uint8_t no_variables = 1;
+            for (int tpos=last_pos; tpos < func_pos; tpos++) {
+                if (((function_list[tpos].value_type & 0x40) && (function_list[tpos].oper == func_value)) || (function_list[tpos].oper == func_user_defined)) {
+                    no_variables = 0;
+                    break;
+                }
+            }
+            if (no_variables) {
+                printf("Expression %p has no variables, evaluating\n", exprpos);
+                uint32_t argtype = function_list[last_pos].oper(function_list+last_pos, stack+stack_size);
+                double *temp = malloc((argtype>>8)*sizeof(double));
+                memcpy(temp, stack+stack_size, (argtype>>8)*sizeof(double));
+                function_list[last_pos] = new_value(temp, argtype, NULL);
+                memset(function_list+last_pos+1, 0, (func_pos-last_pos-1)*sizeof(function));
+                func_pos = last_pos+1;
+            }
             varpos = var_size + variable_list;
             stringpos = stringbuf + string_size;
             if ((var_size > 0) && (variable_list[var_size-1].flags & VARIABLE_XYLIKE) && (variable_list[var_size-1].flags & VARIABLE_IN_SCOPE)) {
@@ -1470,7 +1508,14 @@ expression* parse_file(function *function_list, double *stack, variable *variabl
     
     // Print the function table
     for (i=0; i < func_pos; i++) {
-        printf("%02d %p: first_arg: %p, next_arg: %p, oper: %p, value: %p, value_type: %08x\n", i, function_list+i, function_list[i].first_arg, function_list[i].next_arg, function_list[i].oper, function_list[i].value, function_list[i].value_type);
+        if (function_list[i].value_type & 0x40) printf("%02d %p: first_arg: %p, next_arg: %p, oper: %p, value: %p (%s), value_type: %08x\n", i, function_list+i,
+                function_list[i].first_arg, function_list[i].next_arg, function_list[i].oper, function_list[i].value, ((variable*)(function_list[i].value))->name,
+                function_list[i].value_type);
+        else if (function_list[i].oper == func_value) printf("%02d %p: first_arg: %p, next_arg: %p, oper: %p, value: %p (%f), value_type: %08x\n", i, function_list+i,
+                function_list[i].first_arg, function_list[i].next_arg, function_list[i].oper, function_list[i].value, ((double*)(function_list[i].value))[0],
+                function_list[i].value_type);
+        else printf("%02d %p: first_arg: %p, next_arg: %p, oper: %p, value: %p, value_type: %08x\n", i, function_list+i, function_list[i].first_arg, 
+                function_list[i].next_arg, function_list[i].oper, function_list[i].value, function_list[i].value_type);
     }
     
 

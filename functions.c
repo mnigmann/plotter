@@ -88,8 +88,17 @@ uint32_t func_general_two_args(void *f, double *stackpos, double (*oper)(double,
 
 uint32_t func_value(void *f, double *stackpos) {
     function *fs = (function*)f; 
-    uint32_t type = ((fs->value_type)&0x40 ? ((variable*)(fs->value))->type : fs->value_type);
-    double *ptr = ((fs->value_type)&0x40 ? ((variable*)(fs->value))->pointer : (double*)(fs->value));
+    uint32_t type;
+    double *ptr;
+    if (fs->value_type&0x40) {
+        type = ((variable*)(fs->value))->type;
+        ptr = ((variable*)(fs->value))->pointer;
+        if (!ptr) FAIL("ERROR: function block %p references variable %s with null pointer\n", fs, ((variable*)(fs->value))->name);
+    } else {
+        type = fs->value_type;
+        ptr = (double*)(fs->value);
+        if (!ptr) FAIL("ERROR: pointer in function block %p is null\n", fs);
+    }
     uint32_t len = type>>8;
     for (int i=0; i < len; i++) stackpos[i] = ptr[i]*SIGN_BIT(fs);
     return type;
@@ -195,6 +204,10 @@ uint32_t func_abs(void *f, double *stackpos) {
     return func_general_one_arg(f, stackpos, fabs);
 }
 
+uint32_t func_log(void *f, double *stackpos) {
+    return func_general_one_arg(f, stackpos, log);
+}
+
 uint32_t func_max(void *f, double *stackpos) {
     function *fs = (function*)f;
     function *arg = fs->first_arg;
@@ -273,6 +286,7 @@ uint32_t func_multiply(void *f, double *stackpos) {
     result_length = result_type>>8;
     result_length /= GET_STEP(result_type);
     arg = arg->next_arg;
+    //printf("Initial value (%08x): ", result_type); print_object(result_type, stackpos); printf("\n");
     double *pos;
     while (arg) {
         type = arg->oper(arg, stackpos+result_length*GET_STEP(result_type));
@@ -286,7 +300,7 @@ uint32_t func_multiply(void *f, double *stackpos) {
             printf("\n    expr:   "); print_object(type, pos);
             FAIL("\n");
         }
-        //printf("Adding (%08x): ", type); print_object(type, stackpos+result_length); printf("\n");
+        //printf("Multiplying (%08x): ", type); print_object(type, stackpos+result_length); printf("\n");
         if (!(result_type & TYPE_LIST) && (type & TYPE_LIST)) {
             // To multiply a scalar/point by a list, we multiply the list by
             // the scalar/point in-place and then copy the list down. If the 
@@ -387,24 +401,14 @@ uint32_t func_list(void *f, double *stackpos) {
     uint32_t st=0;
     uint8_t ellipsis = 0;
     do {
-        if (arg->oper) {
-            argtype = arg->oper(arg, stackpos+st);
-            if ((argtype == TYPE_ELLIPSIS) && ((type & TYPE_MASK) == TYPE_DOUBLE) && (arg->next_arg)) {
-                ellipsis = 2;
-            } else {
-                if (argtype & TYPE_LIST) FAIL("ERROR: Cannot store a list inside a list\n");
-                if ((type != 0xff) && ((argtype&0xff) != type)) FAIL("ERROR: All list elements must have the same type\n");
-                st += argtype>>8;
-                type = argtype & 0xff;
-            }
+        argtype = arg->oper(arg, stackpos+st);
+        if ((argtype == TYPE_ELLIPSIS) && ((type & TYPE_MASK) == TYPE_DOUBLE) && (arg->next_arg)) {
+            ellipsis = 2;
         } else {
-            argtype = ((arg->value_type)&0x40 ? ((variable*)(arg->value))->type : arg->value_type);
             if (argtype & TYPE_LIST) FAIL("ERROR: Cannot store a list inside a list\n");
             if ((type != 0xff) && ((argtype&0xff) != type)) FAIL("ERROR: All list elements must have the same type\n");
+            st += argtype>>8;
             type = argtype & 0xff;
-            arglen = argtype>>8;
-            for (int i=0; i < arglen; i++) stackpos[st+i] = VALUE_LIST(arg, i);
-            st += arglen;
         }
         if (ellipsis == 2) ellipsis--;
         else if (ellipsis) {
@@ -445,7 +449,10 @@ uint32_t func_index(void *f, double *stackpos) {
         for (int i=0; i < l1; i++) stackpos[i] = VALUE_LIST(arg, i);
     }
     val1 = stackpos;
-    if (!(t1 & TYPE_LIST)) FAIL("ERROR: Cannot index a non-list\n");
+    if (!(t1 & TYPE_LIST)) {
+        print_object(t1, val1); printf("\n");
+        FAIL("ERROR: Cannot index a non-list\n");
+    }
     
     arg = arg->next_arg;
     if (arg->oper) {
@@ -742,9 +749,19 @@ double equals(double a, double b) {
     return (a==b ? 1.0 : 0.0);
 }
 
+double greater(double a, double b) {
+    return (a>b ? 1.0 : 0.0);
+}
+
 uint32_t func_equals(void *f, double *stackpos) {
     //printf("checking equals\n");
     uint32_t res = func_general_two_args(f, stackpos, equals);
+    return res | TYPE_BOOLEAN;
+}
+
+uint32_t func_greater(void *f, double *stackpos) {
+    //printf("checking equals\n");
+    uint32_t res = func_general_two_args(f, stackpos, greater);
     return res | TYPE_BOOLEAN;
 }
 
@@ -838,28 +855,29 @@ uint32_t func_sum(void *f, double *stackpos) {
         varptr->pointer = &value;
         varptr->type = 0x100;
         for (value=start_val; value <= end_val; value++) {
-            t_expr = expr->oper(expr, stackpos+result_length);
+            t_expr = expr->oper(expr, stackpos+st+result_length);
+            //printf("adding %08x: ", t_expr); print_object(t_expr, stackpos+st+result_length); printf("\n");
             uint32_t len = t_expr>>8;
             if (t_expr & TYPE_LIST) {
                 if (result_type & TYPE_LIST) {
                     // The result has already been made a list, so we multiply and pick the minimum length
-                    for (i=0; (i < result_length) && (i < len); i++) stackpos[st+i] += stackpos[result_length+i];
+                    for (i=0; (i < result_length) && (i < len); i++) stackpos[st+i] += stackpos[st+result_length+i];
                     // i will be the minimum of result_length and len
                     result_length = i;
                     result_type = TYPE_LIST;
                 } else {
                     // The result is currently a scalar and must be updated
-                    for (i=0; i < len; i++) stackpos[i] += sum;
+                    for (i=0; i < len; i++) stackpos[st+i] += sum;
                     result_length = len;
                     result_type = TYPE_LIST;
                 }
             } else {
                 if (result_type & TYPE_LIST) {
                     // The result is already a list but the current term is a scalar
-                    for (i=0; i < result_length; i++) stackpos[i] += stackpos[result_length];
+                    for (i=0; i < result_length; i++) stackpos[st+i] += stackpos[st+result_length];
                 } else {
                     // The result is a scalar and the term is a scalar
-                    sum += stackpos[result_length];
+                    sum += stackpos[st+result_length];
                 }
             }
         }
@@ -868,7 +886,67 @@ uint32_t func_sum(void *f, double *stackpos) {
         stackpos[0] = sum*SIGN_BIT(fs);
         result_length = 1;
     } else {
-        for (int j=0; j < result_length; j++) stackpos[j] = stackpos[j]*SIGN_BIT(fs);
+        for (int j=0; j < result_length; j++) stackpos[j] = stackpos[st+j]*SIGN_BIT(fs);
+    }
+    return (result_length<<8) | result_type;
+}
+
+uint32_t func_prod(void *f, double *stackpos) {
+    function *fs = (function*)f;
+    function *var = fs->first_arg;
+    function *start = var->next_arg;
+    function *end = start->next_arg;
+    function *expr = end->next_arg;
+    variable *varptr = var->value;
+    uint32_t t_start, t_end, t_expr, st=0;
+    t_start = start->oper(start, stackpos);
+    st += t_start>>8;
+    t_end = end->oper(end, stackpos+st);
+    double *val1 = stackpos, *val2 = stackpos+st;
+    st += t_end>>8;
+    
+    uint32_t result_length = 0;
+    uint32_t result_type = 0;
+    double value;
+    double prod = 1;
+    int i;
+    double start_val = *val1;
+    double end_val = *val2;
+    if (!(t_start & TYPE_LIST) && !(t_end & TYPE_LIST)) {
+        varptr->pointer = &value;
+        varptr->type = 0x100;
+        for (value=start_val; value <= end_val; value++) {
+            t_expr = expr->oper(expr, stackpos+st+result_length);
+            uint32_t len = t_expr>>8;
+            if (t_expr & TYPE_LIST) {
+                if (result_type & TYPE_LIST) {
+                    // The result has already been made a list, so we multiply and pick the minimum length
+                    for (i=0; (i < result_length) && (i < len); i++) stackpos[st+i] *= stackpos[st+result_length+i];
+                    // i will be the minimum of result_length and len
+                    result_length = i;
+                    result_type = TYPE_LIST;
+                } else {
+                    // The result is currently a scalar and must be updated
+                    for (i=0; i < len; i++) stackpos[st+i] *= prod;
+                    result_length = len;
+                    result_type = TYPE_LIST;
+                }
+            } else {
+                if (result_type & TYPE_LIST) {
+                    // The result is already a list but the current term is a scalar
+                    for (i=0; i < result_length; i++) stackpos[st+i] *= stackpos[st+result_length];
+                } else {
+                    // The result is a scalar and the term is a scalar
+                    prod *= stackpos[st+result_length];
+                }
+            }
+        }
+    }
+    if (!(result_type & TYPE_LIST)) {
+        stackpos[0] = prod*SIGN_BIT(fs);
+        result_length = 1;
+    } else {
+        for (int j=0; j < result_length; j++) stackpos[j] = stackpos[st+j]*SIGN_BIT(fs);
     }
     return (result_length<<8) | result_type;
 }
@@ -994,8 +1072,20 @@ uint32_t func_conditional(void *f, double *stackpos) {
                 //printf("    last_mask_ptr %p (%ld)\n", last_mask_ptr, last_mask_ptr - stackpos);
             } else {
                 last_mask = stackpos[0];
+                last_mask_ptr = NULL;
             }
         } else {
+            if (!last_mask_ptr) {
+                if (((lasttype & TYPE_MASK) != TYPE_BOOLEAN) || (last_mask)) {
+                    // Default expression
+                    for (int i=0; i < arglen; i++) stackpos[i] = stackpos[st+lastlen+i]*SIGN_BIT(fs);
+                    return argtype;
+                }
+                lastlen = 0;
+                lasttype = argtype;
+                arg = arg->next_arg;
+                continue;
+            }
             if (result_type == -1) result_type = argtype;
             else if ((result_type & TYPE_MASK) != (argtype & TYPE_MASK)) FAIL("ERROR: all branches of a conditional must have the same type\n");
             result_type |= argtype;
@@ -1119,5 +1209,30 @@ uint32_t func_sort(void *f, double *stackpos) {
         for (int i=0; i < (argtype>>8); i++) stackpos[i] *= SIGN_BIT(fs);
         return argtype;
     }
+}
+
+uint32_t func_join(void *f, double *stackpos) {
+    function *fs = (function*)f;
+    function *arg = fs->first_arg;
+    
+    uint32_t st=0;
+    uint32_t type=-1, argtype;
+    while (arg) {
+        argtype = arg->oper(arg, stackpos+st);
+        if ((type != -1) && ((type & TYPE_MASK) != (argtype & TYPE_MASK))) FAIL("ERROR: lists must have same type to join\n");
+        type = argtype;
+        st += argtype>>8;
+        arg = arg->next_arg;
+    }
+    return (st<<8) | (type & 0xff) | TYPE_LIST;
+}
+
+uint32_t func_length(void *f, double *stackpos) {
+    function *fs = (function*)f;
+    function *arg = fs->first_arg;
+    
+    uint32_t argtype = arg->oper(arg, stackpos);
+    stackpos[0] = (argtype>>8)/GET_STEP(argtype);
+    return 1<<8;
 }
 
