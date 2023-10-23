@@ -144,4 +144,41 @@ uint32_t func_eigvals(void *f, double *stackpos) {
     return (n<<9) | TYPE_POINT;
 }
 
+uint32_t func_det(void *f, double *stackpos) {
+    function *fs = (function*)f;
+    function *arg = fs->first_arg;
+
+    uint32_t argtype, alen, blen;
+    argtype = arg->oper(arg, stackpos);
+    alen = argtype>>8;
+    int info;
+    if (IS_TYPE(argtype, TYPE_POINT)) {
+        // Complex matrix
+        int32_t n = isqrt(alen/2);
+        int *ipiv = (int*)(stackpos+alen);
+        if (2*n*n != alen) FAIL("ERROR: can only compute determinant of square matrix\n");
+        lapack_complex_double *a = (lapack_complex_double*)stackpos;
+        LAPACK_zgetrf(&n, &n, a, &n, ipiv, &info);
+        lapack_complex_double det = 1;
+        for (int i=0; i < n; i++) {
+            det *= a[(n+1)*i];
+            if (i+1 != ipiv[i]) det = -det;
+        }
+        stackpos[0] = creal(det);
+        stackpos[1] = cimag(det);
+        return (1<<9) | TYPE_POINT;
+    } else {
+        int32_t n = isqrt(alen);
+        int *ipiv = (int*)(stackpos+alen);
+        if (n*n != alen) FAIL("ERROR: can only compute determinant of square matrix\n");
+        LAPACK_dgetrf(&n, &n, stackpos, &n, ipiv, &info);
+        double det = 1;
+        for (int i=0; i < n; i++) {
+            det *= stackpos[(n+1)*i];
+            if (i+1 != ipiv[i]) det = -det;
+        }
+        stackpos[0] = det;
+        return 1<<8;
+    }
+}
 

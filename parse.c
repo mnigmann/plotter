@@ -458,7 +458,11 @@ int parse_latex_rec(char *latex, int end, function *function_list, double *stack
         if (i >= 0) {
             printf("comma term %.*s\n", i - last_term, latex+last_term);
             
-            if (n_terms > 0) function_list[last_pos].next_arg = function_list + func_pos;
+            if (n_terms > 0) {
+                // For assignments, we chain by value and not by next_arg
+                if (function_list[last_pos].oper == func_assign) function_list[last_pos].value = function_list + func_pos;
+                else function_list[last_pos].next_arg = function_list + func_pos;
+            }
             last_pos = func_pos;
             
             func_pos += PARSE_LATEX_REC(latex+last_term, i - last_term, function_list+func_pos);
@@ -698,6 +702,13 @@ int parse_latex_rec(char *latex, int end, function *function_list, double *stack
                 arg1_end -= 6;
                 arg1_start = cmd_end + 6;
                 oper = func_sine;
+            } else if ((cmd_len == 3) && (strncmp(latex+cmd_start, "det", cmd_len)==0)) {
+                arg1_end = extract_parenthetical(latex, cmd_end);
+                printf("multiply det %.*s\n", arg1_end - cmd_end - 12, latex+cmd_end+6);
+                i = arg1_end;
+                arg1_end -= 6;
+                arg1_start = cmd_end + 6;
+                oper = func_det;
             } else if (((strncmp(latex+cmd_start, "sum", cmd_len) == 0) && (cmd_len == 3)) || ((strncmp(latex+cmd_start, "prod", cmd_len) == 0) && (cmd_len == 4))) {
                 // Sums have three parts: a definition, an end point, and an expression to be summed
                 // We assume that the entire remaining expression is the sum
