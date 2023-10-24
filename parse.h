@@ -14,9 +14,11 @@
 
 #define EXPRESSION_PLOTTABLE 0x01
 #define EXPRESSION_FIXED 0x02
+#define EXPRESSION_ACTION 0x04
 
 #define PARSE_COMMA 0x01
 #define PARSE_NEWVAR 0x02
+#define PARSE_ACTION 0x04
 
 /*
  * Data structures used for this program
@@ -72,6 +74,6 @@ uint32_t load_file(char *fname, expression *expression_list);
 void evaluate_from(expression *expression_list, int n_expr, expression *top_expr, double *stack);
 int parse_latex_rec(char *latex, int end, function *function_list, double *stack, variable *variable_list, char *stringbuf, int *stack_size, int *var_size, int *string_size, uint8_t *flags);
 void parse_latex(char *latex, function *function_list, double *stack, variable *variable_list, char *stringbuf, int *stack_size, int *var_size, int *string_size);
-expression* parse_file(function *function_list, double *stack, variable *variable_list, char *stringbuf, expression *expression_list, uint32_t *n_func, uint32_t *n_var, uint32_t n_expr);
+expression* parse_file(function *function_list, double *stack, variable *variable_list, char *stringbuf, expression *expression_list, uint32_t *n_func, uint32_t *n_var, uint32_t n_expr, uint32_t *n_stack);
 
 #endif

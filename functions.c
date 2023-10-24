@@ -94,7 +94,7 @@ uint32_t func_value(void *f, double *stackpos) {
     if (fs->value_type&0x40) {
         type = ((variable*)(fs->value))->type;
         ptr = ((variable*)(fs->value))->pointer;
-        if (!ptr) FAIL("ERROR: function block %p references variable %s with null pointer\n", fs, ((variable*)(fs->value))->name);
+        if (!ptr) FAIL("ERROR: function block %p references variable %p (%s) with null pointer\n", fs, fs->value, ((variable*)(fs->value))->name);
     } else {
         type = fs->value_type;
         ptr = (double*)(fs->value);
@@ -225,7 +225,20 @@ uint32_t func_factorial(void *f, double *stackpos) {
 }
 
 uint32_t func_abs(void *f, double *stackpos) {
-    return func_general_one_arg(f, stackpos, fabs);
+    function *fs = (function*)f;
+    function *arg = fs->first_arg;
+    uint32_t type = arg->oper(arg, stackpos);
+    uint32_t len = type>>8;
+    if (IS_TYPE(type, TYPE_POINT)) {
+        for (int i=0, j=0; i < len; i+=2, j++) stackpos[j] = hypot(stackpos[i], stackpos[i+1]);
+        type = ((len/2)<<8) | (type & TYPE_LIST);
+        return type;
+    } else {
+        for (int i=0; i<len; i++) {
+            if (stackpos[i] < 0) stackpos[i] = -stackpos[i];
+        }
+        return type;
+    }
 }
 
 uint32_t func_log(void *f, double *stackpos) {
@@ -294,6 +307,7 @@ uint32_t func_add(void *f, double *stackpos) {
     //printf("func_add\n");
     while (arg) {
         type = arg->oper(arg, stackpos+result_length);
+        //printf("adding %08x: ", type); print_object(type, stackpos+result_length); printf("\n");
         // Keep track of the position in case result_length is changed.
         pos = stackpos+result_length;
         if (add_in_place(stackpos, pos, &result_type, &result_length, type)) {
@@ -451,6 +465,7 @@ uint32_t func_user_defined(void *f, double *stackpos) {
 uint32_t func_list(void *f, double *stackpos) {
     function *fs = (function*)f;
     function *arg = fs->first_arg;
+    if (!arg) return TYPE_LIST;
     uint8_t type = 0xff;
     uint32_t argtype;
     uint32_t arglen;
@@ -480,6 +495,9 @@ uint32_t func_list(void *f, double *stackpos) {
                     }
                 }
             }
+            // If the start and end values are equal, delete one so ony one of them
+            // occurs in the result. Thus, \left[1,...,1\right] evaluates to [1]
+            else st--;
         }
         arg = arg->next_arg;
     } while (arg);
@@ -1081,7 +1099,7 @@ uint32_t func_conditional(void *f, double *stackpos) {
         argtype = arg->oper(arg, stackpos+st+lastlen);
         arglen = argtype>>8;
         uint8_t step = GET_STEP(argtype);
-        //printf("evaluating component of conditional: %08x ", argtype); print_object(argtype, stackpos+st+lastlen); printf("\n");
+        //printf("evaluating component of conditional: %08x, %08x ", argtype, result_type); print_object(argtype, stackpos+st+lastlen); printf("\n");
         // In this case, result_len refers to the number of elements in the list,
         // not the number of doubles the list takes up
         if (argtype & TYPE_LIST) result_len = (arglen/step < result_len ? arglen/step : result_len);
@@ -1103,7 +1121,7 @@ uint32_t func_conditional(void *f, double *stackpos) {
                 if (((lasttype & TYPE_MASK) != TYPE_BOOLEAN) || (last_mask)) {
                     // Default expression
                     for (int i=0; i < arglen; i++) stackpos[i] = stackpos[st+lastlen+i]*SIGN_BIT(fs);
-                    printf("Leaving after evaluating %p\n", arg);
+                    if (fs->value) ((function*)(fs->value))->oper(fs->value, stackpos);
                     return argtype;
                 }
                 lastlen = 0;
@@ -1111,7 +1129,7 @@ uint32_t func_conditional(void *f, double *stackpos) {
                 arg = arg->next_arg;
                 continue;
             }
-            if (result_type == -1) result_type = argtype;
+            if (result_type == -1) result_type = argtype | (lasttype & TYPE_LIST);
             else if ((result_type & TYPE_MASK) != (argtype & TYPE_MASK)) FAIL("ERROR: all branches of a conditional must have the same type\n");
             result_type |= argtype;
             value_ptr = stackpos+st+lastlen;
@@ -1183,6 +1201,7 @@ uint32_t func_conditional(void *f, double *stackpos) {
     //printf("\nresult "); print_object((result_len<<8) | (result_type & 0xff), result_ptr); printf("\n");
     for (int i=0; i < result_len; i++) stackpos[i] = result_ptr[i]*SIGN_BIT(fs);
     //exit(EXIT_FAILURE);
+    if (fs->value) ((function*)(fs->value))->oper(fs->value, stackpos);
     return (result_len<<8) | (result_type & 0xff);
 }
 

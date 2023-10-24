@@ -41,6 +41,7 @@ double stack[65536];
 char stringbuf[500];
 
 uint32_t n_expr;
+uint32_t n_stack;
 expression *top_expr;
 
 clock_t t1, t2;
@@ -241,7 +242,7 @@ gboolean redraw_all(GtkWidget *widget, cairo_t *cr, gpointer data_pointer) {
                 }
                 //cairo_stroke(cr);
             } else {
-                draw_function_slow(expression_list[i].func, stack+60, expression_list[i].color, cr);
+                draw_function_slow(expression_list[i].func, stack+n_stack, expression_list[i].color, cr);
             }
         }
     }
@@ -294,7 +295,7 @@ static gboolean timeout_callback(gpointer data_pointer) {
     // variable 5 is alpha, expression 3 is alpha definition
     printf("timeout_callback\n");
     clock_t t3 = clock();
-    expression_list[ticker_target].func->oper(expression_list[ticker_target].func, stack+60);
+    expression_list[ticker_target].func->oper(expression_list[ticker_target].func, stack+n_stack);
     expression *expr = top_expr;
     expression *from = NULL;
     while (expr) {
@@ -312,7 +313,7 @@ static gboolean timeout_callback(gpointer data_pointer) {
     }
     if (from) {
         printf("evaluating from %p\n", from);
-        evaluate_from(expression_list, n_expr, from, stack+60);
+        evaluate_from(expression_list, n_expr, from, stack+n_stack);
         gtk_widget_queue_draw(data_pointer);
         clock_t t4 = clock();
         printf("Total time: %luus\n", t4-t3);
@@ -395,7 +396,7 @@ int main (int argc, char **argv) {
     uint32_t n_func = 0;
     uint32_t n_var = 0;
     n_expr = load_file(argv[1], expression_list);
-    top_expr = parse_file(function_list, stack, variable_list, stringbuf, expression_list, &n_func, &n_var, n_expr);
+    top_expr = parse_file(function_list, stack, variable_list, stringbuf, expression_list, &n_func, &n_var, n_expr, &n_stack);
     printf("Parsing completed. %d function blocks, %d variables, %d expressions\n", n_func, n_var, n_expr);
     ticker_target = (int)parse_double(argv[2]);
     ticker_step = (int)parse_double(argv[3]);
