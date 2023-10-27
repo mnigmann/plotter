@@ -23,6 +23,7 @@ uint32_t func_sine(void *f, double *stackpos);
 uint32_t func_cosine(void *f, double *stackpos);
 uint32_t func_arctan(void *f, double *stackpos);
 uint32_t func_log(void *f, double *stackpos);
+uint32_t func_exp(void *f, double *stackpos);
 uint32_t func_factorial(void *f, double *stackpos);
 uint32_t func_abs(void *f, double *stackpos);
 uint32_t func_add(void *f, double *stackpos);

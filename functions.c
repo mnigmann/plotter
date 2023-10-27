@@ -245,6 +245,10 @@ uint32_t func_log(void *f, double *stackpos) {
     return func_general_one_arg(f, stackpos, log);
 }
 
+uint32_t func_exp(void *f, double *stackpos) {
+    return func_general_one_arg(f, stackpos, exp);
+}
+
 uint32_t func_max(void *f, double *stackpos) {
     function *fs = (function*)f;
     function *arg = fs->first_arg;

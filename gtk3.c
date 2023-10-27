@@ -34,7 +34,7 @@ double xscale;
 double yscale;
 uint16_t nfev = 0;
 
-function function_list[1024];
+function function_list[2048];
 variable variable_list[128];
 expression expression_list[100];
 double stack[65536];

@@ -5,6 +5,7 @@
 #include <stdio.h>
 #include <lapack.h>
 #include <complex.h>
+#include <string.h>
 
 #define SIGN_BIT(v) (((v->value_type)&0x80) ? -1 : 1)
 
@@ -68,7 +69,7 @@ uint32_t func_solve(void *f, double *stackpos) {
             stackpos[i*acols + j] = b[i*ldb + j]*SIGN_BIT(fs);
         }
     }
-    return (nrhs*acols)<<8;
+    return ((nrhs*acols)<<8) | TYPE_LIST;
 }
 
 uint32_t isqrt(uint32_t n) {
@@ -86,6 +87,67 @@ uint32_t isqrt(uint32_t n) {
         d >>= 2;
     }
     return c;
+}
+
+void compute_eigvals(double *stackpos, int32_t n) {
+    uint32_t alen = 2*n*n;
+    uint32_t blen = alen;
+    lapack_int info, lwork=-1, lda=n, ldb=n, ldv=1;
+    lapack_complex_double *result = (lapack_complex_double*)(stackpos+alen+blen);
+    lapack_complex_double lwork_out = -1;
+    lapack_complex_double *alpha = malloc(n*sizeof(lapack_complex_double));
+    lapack_complex_double *beta = malloc(n*sizeof(lapack_complex_double));
+    LAPACK_zggev("N", "N", &n, (lapack_complex_double*)stackpos, &n, (lapack_complex_double*)(stackpos+alen), &n, result, result+n, NULL, &ldv, NULL, &ldv, &lwork_out, &lwork, (double*)(result+2*n), &info);
+    lwork = creal(lwork_out);
+    printf("lwork is %d, info %d\n", lwork, info);
+    lapack_complex_double *work = malloc(lwork*sizeof(lapack_complex_double));
+    LAPACK_zggev("N", "N", &n, (lapack_complex_double*)stackpos, &n, (lapack_complex_double*)(stackpos+alen), &n, alpha, beta, NULL, &ldv, NULL, &ldv, work, &lwork, (double*)(result+2*n), &info);
+    free(work);
+    if (info != 0) printf("WARNING: zggev produced non-zero error code %d\n", info);
+    for (int i=0; i < alen+blen+12*n+lwork*2; i++) {
+        printf("%e\t", stackpos[i]);
+        if (i%8 == 7) printf("\n");
+    }
+    lapack_complex_double lambda;
+    for (int i=0; i < n; i++) {
+        //lambda = result[i]/result[i+n];
+        lambda = alpha[i]/beta[i];
+        printf("eigval is %e%+ei, %e%+ei, %e%+ei\n", CSPLIT(alpha[i]), CSPLIT(beta[i]), CSPLIT(lambda));
+        stackpos[2*i] = creal(lambda);
+        stackpos[2*i+1] = cimag(lambda);
+    }
+    free(alpha);
+    free(beta);
+}
+
+void compute_eigvals_real(double *stackpos, int32_t n) {
+    uint32_t alen = 2*n*n;
+    uint32_t blen = alen;
+    for (int i=0; i < alen; i+=2) stackpos[i/2] = stackpos[i];
+    for (int i=0; i < blen; i+=2) stackpos[alen+i/2] = stackpos[alen+i];
+    lapack_int info, lwork=-1, lda=n, ldb=n, ldv=1;
+    double lwork_out = -1;
+    double *alpha_r = malloc(n*sizeof(double));
+    double *alpha_i = malloc(n*sizeof(double));
+    double *beta = malloc(n*sizeof(double));
+    LAPACK_dggev("N", "N", &n, stackpos, &n, stackpos+alen, &n, alpha_r, alpha_i, beta, NULL, &ldv, NULL, &ldv, &lwork_out, &lwork, &info);
+    lwork = creal(lwork_out);
+    printf("lwork is %d, info %d\n", lwork, info);
+    double *work = malloc(lwork*sizeof(double));
+    LAPACK_dggev("N", "N", &n, stackpos, &n, stackpos+alen, &n, alpha_r, alpha_i, beta, NULL, &ldv, NULL, &ldv, work, &lwork, &info);
+    free(work);
+    if (info != 0) printf("WARNING: zggev produced non-zero error code %d\n", info);
+    lapack_complex_double lambda;
+    for (int i=0; i < n; i++) {
+        //lambda = result[i]/result[i+n];
+        lambda = (alpha_r[i] + I*alpha_i[i])/beta[i];
+        printf("eigval is %e%+ei, %e, %e%+ei\n", alpha_r[i], alpha_i[i], beta[i], CSPLIT(lambda));
+        stackpos[2*i] = creal(lambda);
+        stackpos[2*i+1] = cimag(lambda);
+    }
+    free(alpha_i);
+    free(alpha_r);
+    free(beta);
 }
 
 uint32_t func_eigvals(void *f, double *stackpos) {
@@ -120,19 +182,46 @@ uint32_t func_eigvals(void *f, double *stackpos) {
             blen = blen * 2;
         }
         if (alen != blen) FAIL("ERROR: matrices must have the same dimension to compute generalized eigenvalues\n");
+        memset(stackpos+alen+blen, 0, sizeof(double)*12*n);
+        for (int i=0; i < alen+blen+12*n+198*2; i++) {
+            printf("%e\t", stackpos[i]);
+            if (i%8 == 7) printf("\n");
+        }
+        printf("\n");
+        printf("alen %d, blen %d, n %d\n", alen, blen, n);
+        FILE *fp = fopen("/tmp/input", "w");
+        fwrite(stackpos, sizeof(double), alen+blen, fp);
+        fclose(fp);
         
-        lapack_complex_double *result = (lapack_complex_double*)(stackpos+alen+blen);
-        LAPACK_zggev("N", "N", &n, (lapack_complex_double*)stackpos, &n, (lapack_complex_double*)(stackpos+alen), &n, result, result+n, NULL, &ldv, NULL, &ldv, result+6*n, &lwork, (double*)(result+2*n), &info);
-        lwork = creal(result[6*n]);
-        LAPACK_zggev("N", "N", &n, (lapack_complex_double*)stackpos, &n, (lapack_complex_double*)(stackpos+alen), &n, result, result+n, NULL, &ldv, NULL, &ldv, result+6*n, &lwork, (double*)(result+2*n), &info);
+        compute_eigvals_real(stackpos, n);
+
+        /*lapack_complex_double *result = (lapack_complex_double*)(stackpos+alen+blen);
+        lapack_complex_double lwork_out = -1;
+        lapack_complex_double *alpha = malloc(n*sizeof(lapack_complex_double));
+        lapack_complex_double *beta = malloc(n*sizeof(lapack_complex_double));
+        LAPACK_zggev("N", "N", &n, (lapack_complex_double*)stackpos, &n, (lapack_complex_double*)(stackpos+alen), &n, result, result+n, NULL, &ldv, NULL, &ldv, &lwork_out, &lwork, (double*)(result+2*n), &info);
+        lwork = creal(lwork_out);
+        printf("lwork is %d, info %d\n", lwork, info);
+        lapack_complex_double *work = malloc(lwork*sizeof(lapack_complex_double));
+        LAPACK_zggev("N", "N", &n, (lapack_complex_double*)stackpos, &n, (lapack_complex_double*)(stackpos+alen), &n, alpha, beta, NULL, &ldv, NULL, &ldv, work, &lwork, (double*)(result+2*n), &info);
+        free(work);
         if (info != 0) printf("WARNING: zggev produced non-zero error code %d\n", info);
+        for (int i=0; i < alen+blen+12*n+lwork*2; i++) {
+            printf("%e\t", stackpos[i]);
+            if (i%8 == 7) printf("\n");
+        }
         lapack_complex_double lambda;
         for (int i=0; i < n; i++) {
-            lambda = result[i]/result[i+n];
-            printf("eigval is %e%+ei, %e%+ei, %e%+ei\n", CSPLIT(result[i]), CSPLIT(result[i+n]), CSPLIT(lambda));
-            stackpos[2*i] = creal(lambda)*SIGN_BIT(fs);
-            stackpos[2*i+1] = cimag(lambda)*SIGN_BIT(fs);
+            //lambda = result[i]/result[i+n];
+            lambda = alpha[i]/beta[i];
+            printf("eigval is %e%+ei, %e%+ei, %e%+ei\n", CSPLIT(alpha[i]), CSPLIT(beta[i]), CSPLIT(lambda));
+            stackpos[2*i] = creal(lambda);
+            stackpos[2*i+1] = cimag(lambda);
         }
+        free(alpha);
+        free(beta);*/
+        for (int i=0; i < n*2; i++) stackpos[i] *= SIGN_BIT(fs);
+
         return (n<<9) | TYPE_POINT | TYPE_LIST;
     }
     

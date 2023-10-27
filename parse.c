@@ -286,14 +286,16 @@ void evaluate_from(expression *expression_list, int n_expr, expression *top_expr
         if ((expr->func) && (expr->var) && !(expr->var->flags & VARIABLE_FUNCTION) && ((expr->flags & EXPRESSION_FIXED) || !(expr->flags & EXPRESSION_PLOTTABLE))) {
             printf("evaluating variable %s, expression %p (%03ld), variable block %p, function block %p, old pointer %p, stack %p\n", expr->var->name, expr, expr-expression_list+1, expr->var, expr->func, expr->value, stack);
             type = (expr->func->oper(expr->func, stack));
+            ptr = NULL;
             // If the size changes, reallocate. Otherwise, use the same memory
-            if (((expr->value_type) >> 8) != (type >> 8))
-                ptr = realloc(expr->value, (type>>8)*sizeof(double));
-            else ptr = expr->value;
+            if (((expr->value_type) >> 8) != (type >> 8)) {
+                if ((expr->value_type) >> 8) ptr = realloc(expr->value, (type>>8)*sizeof(double));
+                else ptr = malloc((type>>8)*sizeof(double));
+            } else ptr = expr->value;
             // Special case for zero-length lists
             // TODO: actions
             if (type>>8) memcpy(ptr, stack, (type>>8)*sizeof(double));
-            else ptr = stack;
+            else if (!ptr) ptr = stack;
             printf("    result "); print_object_short(type, ptr);
             printf(" stored to %p, has type %08x\n", ptr, type);
             if (type & TYPE_POINT) expr->flags |= EXPRESSION_PLOTTABLE | EXPRESSION_FIXED;
@@ -698,6 +700,13 @@ int parse_latex_rec(char *latex, int end, function *function_list, double *stack
                 arg1_end -= 6;
                 arg1_start = cmd_end + 6;
                 oper = func_log;
+            } else if ((cmd_len == 3) && (strncmp(latex+cmd_start, "exp", cmd_len)==0)) {
+                arg1_end = extract_parenthetical(latex, cmd_end);
+                printf("multiply exp %.*s\n", arg1_end - cmd_end - 12, latex+cmd_end+6);
+                i = arg1_end;
+                arg1_end -= 6;
+                arg1_start = cmd_end + 6;
+                oper = func_exp;
             } else if ((cmd_len == 3) && (strncmp(latex+cmd_start, "cos", cmd_len)==0)) {
                 arg1_end = extract_parenthetical(latex, cmd_end);
                 printf("multiply cosine %.*s\n", arg1_end - cmd_end - 12, latex+cmd_end+6);
