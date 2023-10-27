@@ -202,6 +202,9 @@ gboolean redraw_all(GtkWidget *widget, cairo_t *cr, gpointer data_pointer) {
     for (int i=0; i < n_expr; i++) {
         if (expression_list[i].flags & EXPRESSION_PLOTTABLE) {
             if ((expression_list[i].flags & EXPRESSION_FIXED) && ((expression_list[i].value_type & TYPE_MASK) == TYPE_POINT)) {
+#ifdef DEBUG_PLOT
+                t3 = clock();
+#endif
                 int len = (expression_list[i].value_type) >> 8;
                 double *ptr = expression_list[i].value;
                 SET_COLOR(cr, expression_list[i].color);
@@ -211,7 +214,14 @@ gboolean redraw_all(GtkWidget *widget, cairo_t *cr, gpointer data_pointer) {
                     cairo_arc(cr, pt_x, pt_y, POINT_SIZE, 0, 2*G_PI);
                     cairo_fill(cr);
                 }
+#ifdef DEBUG_PLOT
+                t4 = clock();
+                printf("Plotted point expression %p (%d) in %luus\n", expression_list+i, i+1, t4-t3);
+#endif
             } else if ((expression_list[i].flags & EXPRESSION_FIXED) && ((expression_list[i].value_type & TYPE_MASK) == TYPE_POLYGON)) {
+#ifdef DEBUG_PLOT
+                t3 = clock();
+#endif
                 int len = (expression_list[i].value_type) >> 8;
                 double *ptr = expression_list[i].value;
                 double x_temp, y_temp;
@@ -220,7 +230,7 @@ gboolean redraw_all(GtkWidget *widget, cairo_t *cr, gpointer data_pointer) {
                 for (int p=0; p < len; p += 2*MAX_POLYGON_SIZE) {
                     pt_x = SCALE_XK(ptr[p]);
                     pt_y = SCALE_YK(ptr[p+1]);
-                    if (i == 19) SET_COLOR(cr, (expression_list[20].value+color_pos));
+                    //if (i == 19) SET_COLOR(cr, (expression_list[20].value+color_pos));
                     color_pos += 3;
                     cairo_move_to(cr, pt_x, pt_y);
                     for (int k=1; k < MAX_POLYGON_SIZE; k++) {
@@ -228,21 +238,28 @@ gboolean redraw_all(GtkWidget *widget, cairo_t *cr, gpointer data_pointer) {
                         if ((x_temp+1 > x_temp) && (y_temp+1 > y_temp)) {
                             pt_x1 = SCALE_XK(x_temp);
                             pt_y1 = SCALE_YK(y_temp);
-                            //cairo_move_to(cr, pt_x, pt_y);
                             cairo_line_to(cr, pt_x1, pt_y1);
                             pt_x = pt_x1;
                             pt_y = pt_y1;
                         }
                     }
-                    //cairo_move_to(cr, pt_x, pt_y);
-                    //cairo_line_to(cr, SCALE_XK(ptr[p]), SCALE_YK(ptr[p+1]));
                     cairo_close_path(cr);
                     cairo_stroke_preserve(cr);
                     cairo_fill(cr);
                 }
-                //cairo_stroke(cr);
+#ifdef DEBUG_PLOT
+                t4 = clock();
+                printf("Plotted polygon expression %p (%d) in %luus\n", expression_list+i, i+1, t4-t3);
+#endif
             } else {
+#ifdef DEBUG_PLOT
+                t3 = clock();
+#endif
                 draw_function_slow(expression_list[i].func, stack+n_stack, expression_list[i].color, cr);
+#ifdef DEBUG_PLOT
+                t4 = clock();
+                printf("Plotted expression %p (%d) in %luus\n", expression_list+i, i+1, t4-t3);
+#endif
             }
         }
     }
@@ -314,9 +331,9 @@ static gboolean timeout_callback(gpointer data_pointer) {
     if (from) {
         printf("evaluating from %p\n", from);
         evaluate_from(expression_list, n_expr, from, stack+n_stack);
-        gtk_widget_queue_draw(data_pointer);
         clock_t t4 = clock();
-        printf("Total time: %luus\n", t4-t3);
+        printf("Total evaluation time: %luus\n", t4-t3);
+        gtk_widget_queue_draw(data_pointer);
     }
     if (run_ticker) return TRUE;
     return FALSE;
@@ -329,6 +346,9 @@ static gboolean keypress_callback(GtkWidget *widget, GdkEventKey *event, gpointe
         if (ticker_target >= 0) g_timeout_add(ticker_step, timeout_callback, data_pointer);
     } else if (event->keyval == 'e') {
         run_ticker = 0;
+    } else if (event->keyval == 'i') {
+        //treeview_activate();
+        printf("inspecting\n");
     }
     return TRUE;
 }
@@ -408,7 +428,7 @@ int main (int argc, char **argv) {
     int status;
 
 
-    app = gtk_application_new("org.gtk.example", G_APPLICATION_FLAGS_NONE);
+    app = gtk_application_new("org.gtk.example", G_APPLICATION_DEFAULT_FLAGS);
     g_signal_connect(app, "activate", G_CALLBACK (activate), NULL);
     for (int i=4; i < argc; i++) argv[i-3] = argv[i];
     status = g_application_run(G_APPLICATION (app), argc-3, argv);

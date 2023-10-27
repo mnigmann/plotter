@@ -16,7 +16,7 @@
 uint32_t func_solve(void *f, double *stackpos) {
     function *fs = (function*)f;
     function *arg = fs->first_arg;
-    printf("solving system of equations, arg %p\n", arg);
+    //printf("solving system of equations, arg %p\n", arg);
     
     uint32_t st=0;
     uint32_t argtype, alen, blen;
@@ -26,7 +26,7 @@ uint32_t func_solve(void *f, double *stackpos) {
     alen = argtype>>8;
     st += alen;
     if (!IS_TYPE(argtype, TYPE_DOUBLE)) FAIL("ERROR: A matrix must be array of doubles\n");
-    printf("first argument: "); print_object(argtype, stackpos);
+    //printf("first argument: "); print_object(argtype, stackpos);
 
     arg = arg->next_arg;
     double *b = stackpos+st;
@@ -44,7 +44,7 @@ uint32_t func_solve(void *f, double *stackpos) {
     int arows = blen / nrhs;
     int acols = alen / arows;
     int ldb = arows;
-    printf("nrhs %d, arows %d, acols %d, ldb %d\n", nrhs, arows, acols, ldb);
+    //printf("nrhs %d, arows %d, acols %d, ldb %d\n", nrhs, arows, acols, ldb);
     if (acols > ldb) {
         ldb = acols;
         // Space out the columns of B to make room for the result
@@ -99,20 +99,15 @@ void compute_eigvals(double *stackpos, int32_t n) {
     lapack_complex_double *beta = malloc(n*sizeof(lapack_complex_double));
     LAPACK_zggev("N", "N", &n, (lapack_complex_double*)stackpos, &n, (lapack_complex_double*)(stackpos+alen), &n, result, result+n, NULL, &ldv, NULL, &ldv, &lwork_out, &lwork, (double*)(result+2*n), &info);
     lwork = creal(lwork_out);
-    printf("lwork is %d, info %d\n", lwork, info);
     lapack_complex_double *work = malloc(lwork*sizeof(lapack_complex_double));
     LAPACK_zggev("N", "N", &n, (lapack_complex_double*)stackpos, &n, (lapack_complex_double*)(stackpos+alen), &n, alpha, beta, NULL, &ldv, NULL, &ldv, work, &lwork, (double*)(result+2*n), &info);
     free(work);
     if (info != 0) printf("WARNING: zggev produced non-zero error code %d\n", info);
-    for (int i=0; i < alen+blen+12*n+lwork*2; i++) {
-        printf("%e\t", stackpos[i]);
-        if (i%8 == 7) printf("\n");
-    }
     lapack_complex_double lambda;
     for (int i=0; i < n; i++) {
         //lambda = result[i]/result[i+n];
         lambda = alpha[i]/beta[i];
-        printf("eigval is %e%+ei, %e%+ei, %e%+ei\n", CSPLIT(alpha[i]), CSPLIT(beta[i]), CSPLIT(lambda));
+        //printf("eigval is %e%+ei, %e%+ei, %e%+ei\n", CSPLIT(alpha[i]), CSPLIT(beta[i]), CSPLIT(lambda));
         stackpos[2*i] = creal(lambda);
         stackpos[2*i+1] = cimag(lambda);
     }
@@ -141,7 +136,7 @@ void compute_eigvals_real(double *stackpos, int32_t n) {
     for (int i=0; i < n; i++) {
         //lambda = result[i]/result[i+n];
         lambda = (alpha_r[i] + I*alpha_i[i])/beta[i];
-        printf("eigval is %e%+ei, %e, %e%+ei\n", alpha_r[i], alpha_i[i], beta[i], CSPLIT(lambda));
+        //printf("eigval is %e%+ei, %e, %e%+ei\n", alpha_r[i], alpha_i[i], beta[i], CSPLIT(lambda));
         stackpos[2*i] = creal(lambda);
         stackpos[2*i+1] = cimag(lambda);
     }
@@ -183,15 +178,6 @@ uint32_t func_eigvals(void *f, double *stackpos) {
         }
         if (alen != blen) FAIL("ERROR: matrices must have the same dimension to compute generalized eigenvalues\n");
         memset(stackpos+alen+blen, 0, sizeof(double)*12*n);
-        for (int i=0; i < alen+blen+12*n+198*2; i++) {
-            printf("%e\t", stackpos[i]);
-            if (i%8 == 7) printf("\n");
-        }
-        printf("\n");
-        printf("alen %d, blen %d, n %d\n", alen, blen, n);
-        FILE *fp = fopen("/tmp/input", "w");
-        fwrite(stackpos, sizeof(double), alen+blen, fp);
-        fclose(fp);
         
         compute_eigvals_real(stackpos, n);
 

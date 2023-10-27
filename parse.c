@@ -282,9 +282,10 @@ void evaluate_from(expression *expression_list, int n_expr, expression *top_expr
     //printf("stack_size is %d with value %p, stack %p\n", stack_size, expr->value, stack);
     double *ptr;
     while (expr) {
-        printf("on expression %p (%03ld), variable %p, function %p, flags %02x\n", expr, expr-expression_list+1, expr->var, expr->func, expr->flags);
         if ((expr->func) && (expr->var) && !(expr->var->flags & VARIABLE_FUNCTION) && ((expr->flags & EXPRESSION_FIXED) || !(expr->flags & EXPRESSION_PLOTTABLE))) {
+#ifdef DEBUG_EVAL
             printf("evaluating variable %s, expression %p (%03ld), variable block %p, function block %p, old pointer %p, stack %p\n", expr->var->name, expr, expr-expression_list+1, expr->var, expr->func, expr->value, stack);
+#endif
             type = (expr->func->oper(expr->func, stack));
             ptr = NULL;
             // If the size changes, reallocate. Otherwise, use the same memory
@@ -296,8 +297,10 @@ void evaluate_from(expression *expression_list, int n_expr, expression *top_expr
             // TODO: actions
             if (type>>8) memcpy(ptr, stack, (type>>8)*sizeof(double));
             else if (!ptr) ptr = stack;
+#ifdef DEBUG_EVAL
             printf("    result "); print_object_short(type, ptr);
             printf(" stored to %p, has type %08x\n", ptr, type);
+#endif
             if (type & TYPE_POINT) expr->flags |= EXPRESSION_PLOTTABLE | EXPRESSION_FIXED;
             expr->var->pointer = ptr;
             expr->var->type = type;
@@ -310,7 +313,9 @@ void evaluate_from(expression *expression_list, int n_expr, expression *top_expr
     // Evaluate all expressions that are not definitions or actions and are not dependent on x or y
     for (expr=expression_list; expr < expression_list+n_expr; expr++) {
         if ((expr->flags & EXPRESSION_FIXED) && !(expr->var) && !(expr->flags & EXPRESSION_ACTION)) {
+#ifdef DEBUG_EVAL
             printf("evaluating expression %p (%03ld)\n", expr, expr-expression_list+1);
+#endif
             type = (expr->func->oper(expr->func, stack));
             // If the size changes, reallocate. Otherwise, use the same memory
             if (((expr->value_type) >> 8) != (type >> 8))
@@ -318,13 +323,17 @@ void evaluate_from(expression *expression_list, int n_expr, expression *top_expr
             else ptr = expr->value;
             memcpy(ptr, stack, (type>>8)*sizeof(double));
             if (((type & TYPE_MASK) == TYPE_POINT) || ((type & TYPE_MASK) == TYPE_POLYGON)) expr->flags |= EXPRESSION_PLOTTABLE;
+#ifdef DEBUG_EVAL
             printf("    result "); print_object_short(type, ptr);
             printf(" stored to %p, has type %08x\n", ptr, type);
+#endif
             expr->value = ptr;
             expr->value_type = type;
         }
         if (!(expr->func) && (expr->var)) {
+#ifdef DEBUG_EVAL
             printf("expression %p is variable %s with value ", expr, expr->var->name); print_object_short(expr->var->type, expr->var->pointer); printf("\n");
+#endif
             expr->value = expr->var->pointer;
             expr->value_type = expr->var->type;
         }
@@ -1292,7 +1301,6 @@ uint32_t load_file(char *fname, expression *expression_list) {
 }
 
 expression* parse_file(function *function_list, double *stack, variable *variable_list, char *stringbuf, expression *expression_list, uint32_t *n_func, uint32_t *n_var, uint32_t n_expr, uint32_t *n_stack) {
-    FILE *fp;
     size_t len=0;
     ssize_t read;
     int i;
@@ -1587,6 +1595,11 @@ expression* parse_file(function *function_list, double *stack, variable *variabl
         else printf("%02d %p: first_arg: %p, next_arg: %p, oper: %p, value: %p, value_type: %08x\n", i, function_list+i, function_list[i].first_arg, 
                 function_list[i].next_arg, function_list[i].oper, function_list[i].value, function_list[i].value_type);
     }
+
+    FILE *fp = fopen("/tmp/function_list", "w");
+    fwrite(&function_list, sizeof(int64_t), 1, fp);
+    fwrite(function_list, sizeof(function), func_pos, fp);
+    fclose(fp);
     
 
     // Use topological sort to determine the order in which variable and function assignments must be evaluated.

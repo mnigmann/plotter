@@ -183,7 +183,7 @@ uint32_t func_div(void *f, double *stackpos) {
         val2 += 2*result_len;
         if (IS_TYPE(t2, TYPE_DOUBLE)) {
             // divide complex by real
-            printf("dividing complex by real: "); print_object(t1, val1); printf(" / "); print_object(t2, val2); printf("\n");
+            //printf("dividing complex by real: "); print_object(t1, val1); printf(" / "); print_object(t2, val2); printf("\n");
             complex double zn;
             for (int i=0; i < result_len; i++) {
                 zn = val1[(2*i)%l1] + I*val1[(2*i+1)%l1];
