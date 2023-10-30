@@ -1,4 +1,5 @@
 #include <stdint.h>
+#include "parse.h"
 
 #ifndef FUNCTIONS_H
 #define FUNCTIONS_H
@@ -12,6 +13,8 @@
 #define TYPE_POLYGON 0x05
 #define TYPE_MASK 0x07
 #define TYPE_ABSOLUTE_ADDR 0x10
+
+const oper_data *oper_lookup(uint32_t (*ptr)(void*, double*));
 
 uint32_t func_value(void *f, double *stackpos);
 

@@ -1284,3 +1284,55 @@ uint32_t func_length(void *f, double *stackpos) {
     return 1<<8;
 }
 
+
+
+#define N_OPERATORS 36
+const oper_data oper_list[N_OPERATORS] = {
+    {func_value, "func_value"},
+
+    {func_div, "func_div"},
+    {func_floor, "func_floor"},
+    {func_mod, "func_mod"},
+    {func_max, "func_max"},
+    {func_sine, "func_sine"},
+    {func_cosine, "func_cosine"},
+    {func_arctan, "func_arctan"},
+    {func_log, "func_log"},
+    {func_exp, "func_exp"},
+    {func_factorial, "func_factorial"},
+    {func_abs, "func_abs"},
+    {func_add, "func_add"},
+    {func_multiply, "func_multiply"},
+    {func_exponentiate, "func_exponentiate"},
+    {func_user_defined, "func_user_defined"},
+
+    {func_list, "func_list"},
+    {func_index, "func_index"},
+    {func_point, "func_point"},
+    {func_polygon, "func_polygon"},
+    {func_rgb, "func_rgb"},
+    {func_ellipsis, "func_ellipsis"},
+
+    {func_for, "func_for"},
+    {func_equals, "func_equals"},
+    {func_greater, "func_greater"},
+
+    {func_extract_x, "func_extract_x"},
+    {func_extract_y, "func_extract_y"},
+    {func_assign, "func_assign"},
+    {func_sum, "func_sum"},
+    {func_prod, "func_prod"},
+    {func_total, "func_total"},
+    {func_distance, "func_distance"},
+    {func_conditional, "func_conditional"},
+    {func_sort, "func_sort"},
+    {func_join, "func_join"},
+    {func_length, "func_length"}
+};
+
+const oper_data *oper_lookup(uint32_t (*ptr)(void*, double*)) {
+    for (int i=0; i < N_OPERATORS; i++) {
+        if (oper_list[i].oper == ptr) return oper_list+i;
+    }
+    return NULL;
+}

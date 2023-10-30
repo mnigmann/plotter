@@ -270,7 +270,7 @@ int get_next_match(char *latex, int start, int end, char target) {
     return -1;
 }
 
-void evaluate_from(expression *expression_list, int n_expr, expression *top_expr, double *stack) {
+void evaluate_from(file_data *fd, expression *top_expr) {
     // Print the expression table
     //for (int i=0; i < n_expr; i++)
     //    printf("expression pointer at %p, function %p, variable %p, flags %02x, begin %d, variable %p, type %08x\n", expression_list+i, expression_list[i].func, expression_list[i].var, expression_list[i].flags, expression_list[i].expr_begin, expression_list[i].value, expression_list[i].value_type);
@@ -278,6 +278,9 @@ void evaluate_from(expression *expression_list, int n_expr, expression *top_expr
 
     uint32_t type;
     expression *expr = top_expr;
+    expression *expression_list = fd->expression_list;
+    double *stack = (fd->stack) + (fd->n_stack);
+    uint32_t n_expr = fd->n_expr;
     int stack_size = -1;
     //printf("stack_size is %d with value %p, stack %p\n", stack_size, expr->value, stack);
     double *ptr;
@@ -1269,9 +1272,13 @@ uint8_t varncmp(char *varname, char *target, uint32_t len) {
     return (strncmp(varname, target, len) == 0) && (strlen(varname) == len);
 }
 
-uint32_t load_file(char *fname, expression *expression_list) {
+void load_file(char *fname, file_data *fd) {
+    expression *expression_list = fd->expression_list;
     FILE *fp = fopen(fname, "r");
-    if (fp == NULL) return 0;
+    if (fp == NULL) {
+        printf("ERROR: unable to open file %s\n", fname);
+        exit(EXIT_FAILURE);
+    }
     uint32_t n_expr = 0;
     char *temp;
     char *line=NULL;
@@ -1297,10 +1304,16 @@ uint32_t load_file(char *fname, expression *expression_list) {
         else expression_list[n_expr].color[2] = 0;
         n_expr++;
     }
-    return n_expr;
+    fd->n_expr = n_expr;
 }
 
-expression* parse_file(function *function_list, double *stack, variable *variable_list, char *stringbuf, expression *expression_list, uint32_t *n_func, uint32_t *n_var, uint32_t n_expr, uint32_t *n_stack) {
+//expression* parse_file(function *function_list, double *stack, variable *variable_list, char *stringbuf, expression *expression_list, uint32_t *n_func, uint32_t *n_var, uint32_t n_expr, uint32_t *n_stack) {
+expression *parse_file(file_data *fd, char *stringbuf) {
+    expression *expression_list = fd->expression_list;
+    variable *variable_list = fd->variable_list;
+    function *function_list = fd->function_list;
+    double *stack = fd->stack;
+    uint32_t n_expr = fd->n_expr, *n_var = &(fd->n_var), *n_func = &(fd->n_func), *n_stack = &(fd->n_stack);
     size_t len=0;
     ssize_t read;
     int i;
@@ -1636,8 +1649,8 @@ expression* parse_file(function *function_list, double *stack, variable *variabl
         if (p % 8 == 7) printf("\n");
     }
     printf("\n");
-    *n_stack = stack_size;
-    evaluate_from(expression_list, n_expr, top_expr, stack+stack_size);
+    fd->n_stack = stack_size;
+    evaluate_from(fd, top_expr);
 
 
     for (i=0; variable_list+i < varpos; i++)

@@ -62,6 +62,22 @@ typedef struct expression_s {
     char *def;                              // Pointer to char array containing definition. Freed after parsing
 } expression;
 
+typedef struct file_data_s {
+    struct expression_s *expression_list;
+    struct variable_s *variable_list;
+    struct function_s *function_list;
+    double *stack;
+    uint32_t n_expr;
+    uint32_t n_var;
+    uint32_t n_func;
+    uint32_t n_stack;
+} file_data;
+
+typedef struct oper_data_s {
+    uint32_t (*oper)(void*, double*);
+    char *name;
+} oper_data;
+
 double parse_double(char *string);
 
 function new_function(uint32_t (*oper)(void*, double*), function *next_arg, function *first_arg);
@@ -70,10 +86,10 @@ variable new_variable(char *name, int type, uint8_t flags, double *pointer);
 
 void print_object(uint32_t type, double *pos);
 
-uint32_t load_file(char *fname, expression *expression_list);
-void evaluate_from(expression *expression_list, int n_expr, expression *top_expr, double *stack);
+void load_file(char *fname, file_data *fd);
+void evaluate_from(file_data *fd, expression *top_expr);
 int parse_latex_rec(char *latex, int end, function *function_list, double *stack, variable *variable_list, char *stringbuf, int *stack_size, int *var_size, int *string_size, uint8_t *flags);
 void parse_latex(char *latex, function *function_list, double *stack, variable *variable_list, char *stringbuf, int *stack_size, int *var_size, int *string_size);
-expression* parse_file(function *function_list, double *stack, variable *variable_list, char *stringbuf, expression *expression_list, uint32_t *n_func, uint32_t *n_var, uint32_t n_expr, uint32_t *n_stack);
+expression* parse_file(file_data *fd, char *stringbuf);
 
 #endif

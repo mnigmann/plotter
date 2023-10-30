@@ -7,6 +7,7 @@
 #include "functions.h"
 #include "linalg_functions.h"
 #include "config.h"
+#include "treeview.h"
 
 #define SCALE_X(v) ((uint16_t)(250*(1+v)))
 #define SCALE_Y(v) ((uint16_t)(250*(1-v)))
@@ -39,6 +40,7 @@ variable variable_list[128];
 expression expression_list[100];
 double stack[65536];
 char stringbuf[500];
+file_data fd;
 
 uint32_t n_expr;
 uint32_t n_stack;
@@ -198,16 +200,22 @@ gboolean redraw_all(GtkWidget *widget, cairo_t *cr, gpointer data_pointer) {
         cairo_line_to(cr, WIDTH, SCALE_YK(0));
     }
     cairo_stroke(cr);
+
+
     double pt_x, pt_y, pt_x1, pt_y1;
-    for (int i=0; i < n_expr; i++) {
-        if (expression_list[i].flags & EXPRESSION_PLOTTABLE) {
-            if ((expression_list[i].flags & EXPRESSION_FIXED) && ((expression_list[i].value_type & TYPE_MASK) == TYPE_POINT)) {
+    expression *expression_list = fd.expression_list, *expr;
+    double *stack = fd.stack;
+    uint32_t n_stack = fd.n_stack;
+    for (int i=0; i < fd.n_expr; i++) {
+        expr = expression_list+i;
+        if (expr->flags & EXPRESSION_PLOTTABLE) {
+            if ((expr->flags & EXPRESSION_FIXED) && ((expr->value_type & TYPE_MASK) == TYPE_POINT)) {
 #ifdef DEBUG_PLOT
                 t3 = clock();
 #endif
-                int len = (expression_list[i].value_type) >> 8;
-                double *ptr = expression_list[i].value;
-                SET_COLOR(cr, expression_list[i].color);
+                int len = (expr->value_type) >> 8;
+                double *ptr = expr->value;
+                SET_COLOR(cr, expr->color);
                 for (int p=0; p < len; p+=2) {
                     pt_x = SCALE_XK(ptr[p]);
                     pt_y = SCALE_YK(ptr[p+1]);
@@ -218,14 +226,14 @@ gboolean redraw_all(GtkWidget *widget, cairo_t *cr, gpointer data_pointer) {
                 t4 = clock();
                 printf("Plotted point expression %p (%d) in %luus\n", expression_list+i, i+1, t4-t3);
 #endif
-            } else if ((expression_list[i].flags & EXPRESSION_FIXED) && ((expression_list[i].value_type & TYPE_MASK) == TYPE_POLYGON)) {
+            } else if ((expr->flags & EXPRESSION_FIXED) && ((expr->value_type & TYPE_MASK) == TYPE_POLYGON)) {
 #ifdef DEBUG_PLOT
                 t3 = clock();
 #endif
-                int len = (expression_list[i].value_type) >> 8;
-                double *ptr = expression_list[i].value;
+                int len = (expr->value_type) >> 8;
+                double *ptr = expr->value;
                 double x_temp, y_temp;
-                if (i != 19) SET_COLOR(cr, expression_list[i].color);
+                if (i != 19) SET_COLOR(cr, expr->color);
                 uint32_t color_pos = 0;
                 for (int p=0; p < len; p += 2*MAX_POLYGON_SIZE) {
                     pt_x = SCALE_XK(ptr[p]);
@@ -255,7 +263,7 @@ gboolean redraw_all(GtkWidget *widget, cairo_t *cr, gpointer data_pointer) {
 #ifdef DEBUG_PLOT
                 t3 = clock();
 #endif
-                draw_function_slow(expression_list[i].func, stack+n_stack, expression_list[i].color, cr);
+                draw_function_slow(expression_list[i].func, stack+n_stack, expr->color, cr);
 #ifdef DEBUG_PLOT
                 t4 = clock();
                 printf("Plotted expression %p (%d) in %luus\n", expression_list+i, i+1, t4-t3);
@@ -312,12 +320,12 @@ static gboolean timeout_callback(gpointer data_pointer) {
     // variable 5 is alpha, expression 3 is alpha definition
     printf("timeout_callback\n");
     clock_t t3 = clock();
-    expression_list[ticker_target].func->oper(expression_list[ticker_target].func, stack+n_stack);
+    fd.expression_list[ticker_target].func->oper(fd.expression_list[ticker_target].func, (fd.stack)+(fd.n_stack));
     expression *expr = top_expr;
     expression *from = NULL;
     while (expr) {
         if ((expr->var) && (expr->var->new_pointer)) {
-            printf("expression %p (offset %ld) has changed, expr->var %p\n", expr, expr - expression_list, expr->var);
+            printf("expression %p (offset %ld) has changed, expr->var %p\n", expr, expr - (fd.expression_list) + 1, expr->var);
             if (!from) from = expr;
             expr->var->pointer = expr->var->new_pointer;
             expr->var->type = expr->var->new_type;
@@ -330,7 +338,7 @@ static gboolean timeout_callback(gpointer data_pointer) {
     }
     if (from) {
         printf("evaluating from %p\n", from);
-        evaluate_from(expression_list, n_expr, from, stack+n_stack);
+        evaluate_from(&fd, from);
         clock_t t4 = clock();
         printf("Total evaluation time: %luus\n", t4-t3);
         gtk_widget_queue_draw(data_pointer);
@@ -347,7 +355,7 @@ static gboolean keypress_callback(GtkWidget *widget, GdkEventKey *event, gpointe
     } else if (event->keyval == 'e') {
         run_ticker = 0;
     } else if (event->keyval == 'i') {
-        //treeview_activate();
+        treeview_activate(&fd);
         printf("inspecting\n");
     }
     return TRUE;
@@ -406,18 +414,21 @@ int main (int argc, char **argv) {
     variable_list[1] = new_variable("y", 0, VARIABLE_IN_SCOPE, NULL);
     double pi = M_PI;
     variable_list[2] = new_variable("\\pi", 1<<8, VARIABLE_IN_SCOPE, &pi);
-    //parse_latex("\\frac{\\arctan\\left(\\frac{0.1}{x}\\right)}{2}", function_list);
-    //int stack_size = 0;
-    //parse_latex("2x+x^{4-x}\\cos\\left(4+x\\right)-\\left(7+3\\right)", function_list, stack, variable_list, &stack_size);
-    //parse_latex("2\\left(\\sin\\left(5x\\right)-\\sin\\left(3x\\right)\\right)", function_list, stack, variable_list);
-    //parse_latex("\\cos\\left(16x\\right)", function_list, stack, variable_list);
-    //parse_latex("N_{c}\\left[A_{pindex}\\left(N_{f},G\\left(N_{s0}\\left[A_{csnnn}\\right],N_{s1}\\left[A_{csnnn}\\right],\\left[1...\\operatorname{length}\\left(A_{csnnn}\\right)\\right]-A_{csnn}\\left[A_{csnnn}\\right]-1,N_{st}\\left[A_{csnnn}\\right]\\right)\\right)\\right]", function_list, stack);
+
+    fd.expression_list = expression_list;
+    fd.variable_list = variable_list;
+    fd.function_list = function_list;
+    fd.stack = stack;
+    fd.n_expr = 0;
+    fd.n_var = 3;
+    fd.n_func = 0;
+    fd.n_stack = 0;
     
     uint32_t n_func = 0;
     uint32_t n_var = 0;
-    n_expr = load_file(argv[1], expression_list);
-    top_expr = parse_file(function_list, stack, variable_list, stringbuf, expression_list, &n_func, &n_var, n_expr, &n_stack);
-    printf("Parsing completed. %d function blocks, %d variables, %d expressions\n", n_func, n_var, n_expr);
+    load_file(argv[1], &fd);
+    top_expr = parse_file(&fd, stringbuf);
+    printf("Parsing completed. %d function blocks, %d variables, %d expressions\n", fd.n_func, fd.n_var, fd.n_expr);
     ticker_target = (int)parse_double(argv[2]);
     ticker_step = (int)parse_double(argv[3]);
     printf("Expression %d will be evaluated every %d milliseconds\n", ticker_target, ticker_step);
