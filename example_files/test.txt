@@ -11,7 +11,4 @@ w=10^{u}-u
 a\to a+1
 \prod_{n=1}^{6}\left(n^{2},n^{3}\right)
 \left(4,3\right)\left(7,2\right)
-p=0
-q=1
-r=0
-r\to r+1,\left\{\operatorname{mod}\left(r,2\right)=0:p\to p+2,q\to q+2\right\}
+\frac{\left(\cos\left(\exp\left(3x\right)\right),\sin\left(\exp\left(3x\right)\right)\right)}{\exp\left(3x\right)}

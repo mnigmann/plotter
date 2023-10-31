@@ -285,7 +285,7 @@ void evaluate_from(file_data *fd, expression *top_expr) {
     //printf("stack_size is %d with value %p, stack %p\n", stack_size, expr->value, stack);
     double *ptr;
     while (expr) {
-        if ((expr->func) && (expr->var) && !(expr->var->flags & VARIABLE_FUNCTION) && ((expr->flags & EXPRESSION_FIXED) || !(expr->flags & EXPRESSION_PLOTTABLE))) {
+        if ((expr->func) && (expr->var) && !(expr->var->flags & (VARIABLE_FUNCTION | VARIABLE_ACTION)) && ((expr->flags & EXPRESSION_FIXED) || !(expr->flags & EXPRESSION_PLOTTABLE))) {
 #ifdef DEBUG_EVAL
             printf("evaluating variable %s, expression %p (%03ld), variable block %p, function block %p, old pointer %p, stack %p\n", expr->var->name, expr, expr-expression_list+1, expr->var, expr->func, expr->value, stack);
 #endif
@@ -480,11 +480,7 @@ int parse_latex_rec(char *latex, int end, function *function_list, double *stack
             if (n_terms > 0) {
                 // For assignments, we chain by value and not by next_arg
                 printf("Chaining comma term with flags %02x\n", flags);
-                if (flags & PARSE_ACTION) {
-                    function_list[last_pos].value = function_list + func_pos;
-                    *result_flags |= PARSE_ACTION;
-                }
-                else function_list[last_pos].next_arg = function_list + func_pos;
+                function_list[last_pos].next_arg = function_list + func_pos;
             }
             last_pos = func_pos;
             flags = 0;
@@ -970,6 +966,9 @@ int parse_latex_rec(char *latex, int end, function *function_list, double *stack
                 flags = 0;
                 func_pos += PARSE_LATEX_REC(latex+cmd_start+5, arg1_end - cmd_start - 11, function_list+func_pos);
                 if (flags & PARSE_ACTION) {
+                    shift_blocks(function_list, last_pos, func_pos-last_pos);
+                    func_pos++;
+                    function_list[last_pos] = new_function(func_chain_actions, NULL, function_list+last_pos+1);
                     *result_flags |= PARSE_ACTION;
                 }
                 else if (flags & PARSE_COMMA) {
@@ -1005,6 +1004,12 @@ int parse_latex_rec(char *latex, int end, function *function_list, double *stack
                     last_pos = func_pos;
                     flags = 0;
                     func_pos += PARSE_LATEX_REC(latex+arg2_start+1, i-arg2_start-1, function_list+func_pos);
+                    if ((flags & PARSE_ACTION) && (function_list[last_pos].oper != func_chain_actions)) {
+                        // If the parsed result is a single action, it must be wrapped
+                        shift_blocks(function_list, last_pos, func_pos-last_pos);
+                        func_pos++;
+                        function_list[last_pos] = new_function(func_chain_actions, NULL, function_list+last_pos+1);
+                    }
                     *result_flags |= flags;
                 }
                 // Failed to find colon, last separator is comma, ends with a default expression
@@ -1525,9 +1530,17 @@ expression *parse_file(file_data *fd, char *stringbuf) {
                     break;
                 }
             }
+            if (exprpos->flags & EXPRESSION_ACTION) {
+                shift_blocks(function_list, last_pos, func_pos-last_pos);
+                func_pos++;
+                function_list[last_pos] = new_function(func_chain_actions, NULL, function_list+last_pos+1);
+                exprpos->var->flags |= VARIABLE_ACTION;
+            }
+
             varpos = var_size + variable_list;
             stringpos = stringbuf + string_size;
             function_list[last_pos].value_type |= TYPE_ABSOLUTE_ADDR;
+            // Connect next_arg of the first block in the definition to the variable block of the first argument.
             function_list[last_pos].next_arg = (function*)((exprpos->var)+1);
             // Take the arguments out of the local scope after parsing
             first_arg = (exprpos->var)+1;
@@ -1545,6 +1558,15 @@ expression *parse_file(file_data *fd, char *stringbuf) {
                 if (function_list[p].oper == func_assign) {
                     exprpos->flags |= EXPRESSION_ACTION;
                     break;
+                }
+            }
+            if (exprpos->flags & EXPRESSION_ACTION) {
+                shift_blocks(function_list, last_pos, func_pos-last_pos);
+                func_pos++;
+                function_list[last_pos] = new_function(func_chain_actions, NULL, function_list+last_pos+1);
+                if (exprpos->var) {
+                    exprpos->var->flags |= VARIABLE_ACTION;
+                    exprpos->var->pointer = (double*)(function_list+last_pos);
                 }
             }
             uint8_t no_variables = 1;

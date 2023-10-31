@@ -10,9 +10,11 @@
 #define POINT_SIZE 3
 #define MAX_POLYGON_SIZE 4
 
+// in scale units
 #define DT_DERIV 1e-4
-#define RADIUS_SCALE 1
-#define MAX_ARC_LENGTH 0.1
+// in pixels
+#define MAX_ARC_LENGTH 3
+#define MIN_DT 1e-3
 
 #define PI 3.14159265359
 #define SCROLL_AMOUNT 1.1

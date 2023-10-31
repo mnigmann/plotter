@@ -91,10 +91,17 @@ uint32_t func_value(void *f, double *stackpos) {
     function *fs = (function*)f; 
     uint32_t type;
     double *ptr;
+    variable *var;
     if (fs->value_type&0x40) {
-        type = ((variable*)(fs->value))->type;
-        ptr = ((variable*)(fs->value))->pointer;
-        if (!ptr) FAIL("ERROR: function block %p references variable %p (%s) with null pointer\n", fs, fs->value, ((variable*)(fs->value))->name);
+        var = ((variable*)(fs->value));
+        type = var->type;
+        ptr = var->pointer;
+        if (!ptr) FAIL("ERROR: function block %p references variable %p (%s) with null pointer\n", fs, fs->value, var->name);
+        // If the variable is an action, run its source code
+        if (var->flags & VARIABLE_ACTION) {
+            printf("Action found: %p, %p\n", var, var->pointer);
+            ((function*)(var->pointer))->oper(var->pointer, stackpos);
+        }
     } else {
         type = fs->value_type;
         ptr = (double*)(fs->value);
@@ -901,10 +908,16 @@ uint32_t func_assign(void *f, double *stackpos) {
     target_var->new_type = argtype;
     printf("Assigning "); print_object(argtype, temp); printf(" to %s\n", target_var->name);
 
-    // Call the next action in the list. Comma-separated sequences are automatically
-    // parsed into chained blocks
-    if (fs->value) ((function*)(fs->value))->oper(fs->value, stackpos);
+    return 0;
+}
 
+uint32_t func_chain_actions(void *f, double *stackpos) {
+    function *fs = (function*)f;
+    function *target = fs->first_arg;
+    while (target) {
+        target->oper(target, stackpos);
+        target = target->next_arg;
+    }
     return 0;
 }
 
@@ -1205,7 +1218,6 @@ uint32_t func_conditional(void *f, double *stackpos) {
     //printf("\nresult "); print_object((result_len<<8) | (result_type & 0xff), result_ptr); printf("\n");
     for (int i=0; i < result_len; i++) stackpos[i] = result_ptr[i]*SIGN_BIT(fs);
     //exit(EXIT_FAILURE);
-    if (fs->value) ((function*)(fs->value))->oper(fs->value, stackpos);
     return (result_len<<8) | (result_type & 0xff);
 }
 
@@ -1286,7 +1298,7 @@ uint32_t func_length(void *f, double *stackpos) {
 
 
 
-#define N_OPERATORS 36
+#define N_OPERATORS 37
 const oper_data oper_list[N_OPERATORS] = {
     {func_value, "func_value"},
 
@@ -1320,6 +1332,7 @@ const oper_data oper_list[N_OPERATORS] = {
     {func_extract_x, "func_extract_x"},
     {func_extract_y, "func_extract_y"},
     {func_assign, "func_assign"},
+    {func_chain_actions, "func_chain_actions"},
     {func_sum, "func_sum"},
     {func_prod, "func_prod"},
     {func_total, "func_total"},

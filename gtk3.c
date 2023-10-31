@@ -20,7 +20,7 @@
 
 #define CLIP_WIDTH(v) (v<0 ? 0 : (v>WIDTH ? WIDTH : v))
 #define CLIP_HEIGHT(v) (v<0 ? 0 : (v>HEIGHT ? HEIGHT : v))
-#define IN_BOUNDS(x, y) ((window_x0 <= x) && (x < window_x1) && (window_y0 <= y) && (y < window_y1))
+#define IN_BOUNDS(x, y) ((window_x0 <= x) && (x <= window_x1) && (window_y0 <= y) && (y <= window_y1))
 #define SET_COLOR(cr, color) cairo_set_source_rgb(cr, color[0]/256.0, color[1]/256.0, color[2]/256.0)
 
 #define TOIDX(x, y) (3*(x + y*WIDTH))
@@ -57,13 +57,19 @@ uint8_t run_ticker;
 cairo_matrix_t transform_matrix;
 
 
-void eval_func(double t, double *x, double *y, function *func, double *stackpos) {
+uint32_t eval_func(double t, double *x, double *y, function *func, double *stackpos) {
     variable_list[0].pointer = &t;
     variable_list[0].type = 1<<8;
-    func->oper(func, stackpos);
-    *y = stackpos[0];
-    *x = t;
+    uint32_t type = func->oper(func, stackpos);
+    if ((type & TYPE_MASK) == TYPE_POINT) {
+        *x = stackpos[0];
+        *y = stackpos[1];
+    } else {
+        *y = stackpos[0];
+        *x = t;
+    }
     nfev++;
+    return type;
 }
 
 void est_radius(double x0, double y0, double x1, double y1, double x2, double y2, double *radius, double *speed) {
@@ -118,17 +124,124 @@ void est_radius(double x0, double y0, double x1, double y1, double x2, double y2
 
 void draw_function_slow(function *func, double *stackpos, uint8_t *color, cairo_t *cr) {
     SET_COLOR(cr, color);
-    double x, y, xp, yp;
-    eval_func(window_x0, &xp, &yp, func, stackpos);
+    double x, y, xp, yp, dt, t, t_end;
+    if ((eval_func(window_x0, &xp, &yp, func, stackpos) & TYPE_MASK) == TYPE_POINT) {
+        t = 0;
+        nfev = 0;
+        printf("Parametric function detected\n");
+        eval_func(0, &xp, &yp, func, stackpos);
+        cairo_move_to(cr, SCALE_XK(xp), SCALE_YK(yp));
+        eval_func(DT_DERIV, &x, &y, func, stackpos);
+        dt = MAX_ARC_LENGTH*DT_DERIV/hypot((x-xp)*xscale, (y-yp)*yscale);
+        printf("Initial point (%f, %f), dt is %f\n", xp, yp, dt);
+        t += dt;
+        while (t < 1) {
+            eval_func(t, &x, &y, func, stackpos);
+            cairo_line_to(cr, SCALE_XK(x), SCALE_YK(y));
+            dt = MAX_ARC_LENGTH*dt/hypot((x-xp)*xscale, (y-yp)*yscale);
+            t += dt;
+            xp = x; yp = y;
+        }
+        printf("Parametric evaluation done in %d steps\n", nfev);
+        cairo_stroke(cr);
+        return;
+    }
     cairo_move_to(cr, SCALE_XK(xp), SCALE_YK(yp));
     double minstep_x = (window_x1 - window_x0)/WIDTH;
-    for (double t = window_x0+minstep_x; t < window_x1; t+=minstep_x) {
+    for (t = window_x0+minstep_x; t < window_x1; t+=minstep_x) {
         eval_func(t, &x, &y, func, stackpos);
         if ((x+1 > x) && (y+1 > y) && (xp+1 > xp) && (yp+1 > yp) && (IN_BOUNDS(x, y) || IN_BOUNDS(xp, yp))) cairo_line_to(cr, SCALE_XK(x), SCALE_YK(y));
         else if ((x+1 > x) && (y+1 > y)) cairo_move_to(cr, SCALE_XK(x), SCALE_YK(y));
         xp = x; yp = y;
     }
     cairo_stroke(cr);
+}
+
+void draw_function_constant_ds_rec(function *func, double *stackpos, cairo_t *cr, uint8_t flags, double t_start, double t_end, double xi, double yi, double min_dt) {
+    double x, y, xp, yp, dt;
+    if (t_end - t_start < min_dt) return;
+    //printf("recursive step from %f to %f, flags %02x\n", t_start, t_end, flags);
+    if (flags & 0x01) {
+        // If the lower point is in-bounds, start from there and go up
+        eval_func(t_start, &xp, &yp, func, stackpos);
+        cairo_move_to(cr, SCALE_XK(xp), SCALE_YK(yp));
+        eval_func(t_start+DT_DERIV, &x, &y, func, stackpos);
+        dt = MAX_ARC_LENGTH*DT_DERIV/hypot((x-xp)*xscale, (y-yp)*yscale);
+        //printf("Initial point (%f, %f), dt is %f\n", xp, yp, dt);
+        t_start += dt;
+        while (t_start < t_end) {
+            eval_func(t_start, &x, &y, func, stackpos);
+            cairo_line_to(cr, SCALE_XK(x), SCALE_YK(y));
+            dt = MAX_ARC_LENGTH*dt/hypot((x-xp)*xscale, (y-yp)*yscale);
+            t_start += dt;
+            xp = x; yp = y;
+            if (!IN_BOUNDS(x, y)) {
+                // Leaving the bounds, so iterate on [t, t_end]
+                cairo_stroke(cr);
+                draw_function_constant_ds_rec(func, stackpos, cr, (flags & 0x02), t_start, t_end, x, y, min_dt);
+                break;
+            }
+        }
+        cairo_stroke(cr);
+    } else if (flags & 0x02) {
+        // If the upper point is in-bounds, start from there and go down
+        eval_func(t_end, &xp, &yp, func, stackpos);
+        cairo_move_to(cr, SCALE_XK(xp), SCALE_YK(yp));
+        eval_func(t_end-DT_DERIV, &x, &y, func, stackpos);
+        dt = MAX_ARC_LENGTH*DT_DERIV/hypot((x-xp)*xscale, (y-yp)*yscale);
+        //printf("Initial point (%f, %f), dt is %f\n", xp, yp, dt);
+        t_end -= dt;
+        while (t_end > t_start) {
+            eval_func(t_end, &x, &y, func, stackpos);
+            cairo_line_to(cr, SCALE_XK(x), SCALE_YK(y));
+            dt = MAX_ARC_LENGTH*dt/hypot((x-xp)*xscale, (y-yp)*yscale);
+            t_end -= dt;
+            xp = x; yp = y;
+            if (!IN_BOUNDS(x, y)) {
+                // Leaving the bounds, so iterate on [t, t_end]
+                cairo_stroke(cr);
+                draw_function_constant_ds_rec(func, stackpos, cr, (flags & 0x01), t_start, t_end, x, y, min_dt);
+                break;
+            }
+        }
+        cairo_stroke(cr);
+    } else {
+        // If neither point is in-bounds, subdivide and iterate
+        double t_avg = (t_end + t_start)/2;
+        eval_func(t_avg, &x, &y, func, stackpos);
+        if (hypot((x - xi)*xscale, (y - yi)*yscale) < MAX_ARC_LENGTH) return;
+        //printf("Neither point in bounds on interval %f, %f -> (%f, %f), (%f, %f), %d\n", t_start, t_end, x, y, xi, yi, IN_BOUNDS(x, y));
+        if (IN_BOUNDS(x, y)) {
+            // [t_start, t_avg]
+            draw_function_constant_ds_rec(func, stackpos, cr, (flags & 0x01) | 0x02, t_start, t_avg, x, y, min_dt);
+            // [t_avg, t_end]
+            draw_function_constant_ds_rec(func, stackpos, cr, (flags & 0x02) | 0x01, t_avg, t_end, x, y, min_dt);
+        } else {
+            draw_function_constant_ds_rec(func, stackpos, cr, (flags & 0x01), t_start, t_avg, x, y, min_dt);
+            draw_function_constant_ds_rec(func, stackpos, cr, (flags & 0x02), t_avg, t_end, x, y, min_dt);
+        }
+    }
+}
+
+void draw_function_constant_ds(function *func, double *stackpos, uint8_t *color, cairo_t *cr) {
+    SET_COLOR(cr, color);
+    double x, y, xp, yp, dt, t, t_end;
+    t = 0;
+    t_end = 1;
+    double min_dt = MIN_DT;
+    if ((eval_func(0, &xp, &yp, func, stackpos) & TYPE_MASK) != TYPE_POINT) {
+        t = window_x0;
+        t_end = window_x1;
+        min_dt = MAX_ARC_LENGTH;
+    }
+    nfev = 0;
+    uint8_t flags = 0;
+    eval_func(t, &xp, &yp, func, stackpos);
+    if (IN_BOUNDS(xp, yp)) flags |= 0x01;
+    eval_func(t_end, &x, &y, func, stackpos);
+    if (IN_BOUNDS(x, y)) flags |= 0x02;
+    draw_function_constant_ds_rec(func, stackpos, cr, flags, t, t_end, xp, yp, min_dt);
+    printf("Parametric evaluation completed in %d steps\n", nfev);
 }
 
 static gboolean button_press_callback (GtkWidget *event_box, GdkEventButton *event, gpointer data) {
@@ -263,7 +376,7 @@ gboolean redraw_all(GtkWidget *widget, cairo_t *cr, gpointer data_pointer) {
 #ifdef DEBUG_PLOT
                 t3 = clock();
 #endif
-                draw_function_slow(expression_list[i].func, stack+n_stack, expr->color, cr);
+                draw_function_constant_ds(expression_list[i].func, stack+n_stack, expr->color, cr);
 #ifdef DEBUG_PLOT
                 t4 = clock();
                 printf("Plotted expression %p (%d) in %luus\n", expression_list+i, i+1, t4-t3);

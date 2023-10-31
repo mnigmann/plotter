@@ -20,7 +20,7 @@ enum
 
 void insert_rec(GtkTreeStore *store, function *func, GtkTreeIter *parent, char *stringbuf) {
     GtkTreeIter iter;
-    printf("inserting %p, %p, %p to %p, %p, %p\n", func, func->oper, func->value, store, &iter, parent);
+    printf("inserting %p, oper %p, value %p, first_arg %p, next_arg %p\n", func, func->oper, func->value, func->first_arg, func->next_arg);
     uint32_t v1 = sprintf(stringbuf, "%p", func)+1;
     oper_data *oper = oper_lookup(func->oper);
     uint32_t v2;
@@ -49,6 +49,7 @@ static GtkTreeModel *create_and_fill_model(file_data *fd) {
     char stringbuf[200];
     
     expression *expr;
+    function *func;
     for (int i=0; i < fd->n_expr; i++) {
         expr = (fd->expression_list)+i;
         uint32_t v1 = sprintf(stringbuf, "Expression %p", expr)+1;
@@ -59,7 +60,15 @@ static GtkTreeModel *create_and_fill_model(file_data *fd) {
         if (expr->var) sprintf(stringbuf+v4, "%s", expr->var->name);
         gtk_tree_store_append(store, &iter, NULL);
         gtk_tree_store_set(store, &iter, COL_POINTER, stringbuf, COL_OPER, stringbuf+v1, COL_VALUE, stringbuf+v2, COL_VALUE_TYPE, stringbuf+v3, COL_VARIABLE, stringbuf+v4, -1);
+        func = expr->func;
         insert_rec(store, expr->func, &iter, stringbuf);
+        if (!((expr->var) && (expr->var->flags & VARIABLE_FUNCTION))) {
+            func = func->next_arg;
+            while (func) {
+                insert_rec(store, func, &iter, stringbuf);
+                func = func->next_arg;
+            }
+        }
     }
 
     return GTK_TREE_MODEL(store);
