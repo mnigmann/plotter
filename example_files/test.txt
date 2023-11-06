@@ -11,4 +11,4 @@ w=10^{u}-u
 a\to a+1
 \prod_{n=1}^{6}\left(n^{2},n^{3}\right)
 \left(4,3\right)\left(7,2\right)
-\frac{\left(\cos\left(\exp\left(3x\right)\right),\sin\left(\exp\left(3x\right)\right)\right)}{\exp\left(3x\right)}
+\left(\frac{\cos\left(\exp\left(3x\right)\right)}{\exp\left(3x\right)},\frac{\sin\left(\exp\left(3x\right)\right)}{\exp\left(3x\right)}\right)

@@ -1,4 +1,5 @@
 #include <stdint.h>
+#include <gtk/gtk.h>
 
 #ifndef PARSE_H
 #define PARSE_H
@@ -31,6 +32,7 @@
 
 typedef struct function_s {
     uint32_t (*oper)(void*, double*);       // Pointer to the function this function block implements. May not be null
+    uint32_t (*inter)(void*, double*, double*);
     void *value;                            // Points to the location of a variable. This is used when oper is func_value. May be null otherwise
                                             // Also used to point to a function definition when the operation is another user-defined function
     uint32_t value_type;
@@ -67,15 +69,18 @@ typedef struct file_data_s {
     struct variable_s *variable_list;
     struct function_s *function_list;
     double *stack;
+    double *lstack;
     uint32_t n_expr;
     uint32_t n_var;
     uint32_t n_func;
     uint32_t n_stack;
+    GtkWidget *drawing_area;
 } file_data;
 
 typedef struct oper_data_s {
     uint32_t (*oper)(void*, double*);
     char *name;
+    uint32_t (*inter)(void*, double*, double*);
 } oper_data;
 
 double parse_double(char *string);

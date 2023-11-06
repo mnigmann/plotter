@@ -1277,6 +1277,21 @@ uint8_t varncmp(char *varname, char *target, uint32_t len) {
     return (strncmp(varname, target, len) == 0) && (strlen(varname) == len);
 }
 
+void insert_interval_functions(function *func) {
+    const oper_data *oper = oper_lookup(func->oper);
+    func->inter = oper->inter;
+    if (!(func->inter)) return;
+    function *arg = func->first_arg;
+    while (arg) {
+        insert_interval_functions(arg);
+        if (!(arg->inter)) {
+            func->inter = NULL;
+            return;
+        }
+        arg = arg->next_arg;
+    }
+}
+
 void load_file(char *fname, file_data *fd) {
     expression *expression_list = fd->expression_list;
     FILE *fp = fopen(fname, "r");
@@ -1616,8 +1631,10 @@ expression *parse_file(file_data *fd, char *stringbuf) {
     }
 
     // Print the expression table
-    for (i=0; i < n_expr; i++)
+    for (i=0; i < n_expr; i++) {
         printf("expression pointer at %p, function %p, variable %p, flags %02x, begin %d, dep %p, num %d\n", expression_list+i, expression_list[i].func, expression_list[i].var, expression_list[i].flags, expression_list[i].expr_begin, expression_list[i].dependencies, expression_list[i].num_dependencies);
+        insert_interval_functions(expression_list[i].func);
+    }
     
     // Print the function table
     for (i=0; i < func_pos; i++) {
@@ -1653,12 +1670,12 @@ expression *parse_file(file_data *fd, char *stringbuf) {
     printf("Top is %p\n", top_expr);
     expression *expr = top_expr;
     i=0;
-    while (expr && (i < 100)) {
+    while (expr && (i < n_expr+1)) {
         printf("'%03ld', ", expr-expression_list+1);
         expr = expr->next_expr;
         i++;
     }
-    if (i >= 100) {
+    if (i >= n_expr+1) {
         printf("Circular reference!\n");
         exit(EXIT_FAILURE);
     }

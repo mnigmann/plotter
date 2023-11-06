@@ -34,11 +34,13 @@ double window_y1 = 10;
 double xscale;
 double yscale;
 uint16_t nfev = 0;
+uint16_t niev = 0;
 
 function function_list[2048];
 variable variable_list[128];
 expression expression_list[100];
 double stack[65536];
+double lstack[65536];
 char stringbuf[500];
 file_data fd;
 
@@ -69,6 +71,20 @@ uint32_t eval_func(double t, double *x, double *y, function *func, double *stack
         *x = t;
     }
     nfev++;
+    return type;
+}
+
+uint32_t eval_inter(double *xi, function *func, double *hstackpos, double *lstackpos) {
+    variable_list[0].pointer = xi;
+    variable_list[0].type = 1<<8;
+    uint32_t type = func->inter(func, hstackpos, lstackpos);
+    if ((type & TYPE_MASK) != TYPE_POINT) {
+        hstackpos[1] = hstackpos[0];
+        hstackpos[0] = xi[1];
+        lstackpos[1] = lstackpos[0];
+        lstackpos[0] = xi[0];
+    }
+    niev++;
     return type;
 }
 
@@ -157,9 +173,15 @@ void draw_function_slow(function *func, double *stackpos, uint8_t *color, cairo_
     cairo_stroke(cr);
 }
 
-void draw_function_constant_ds_rec(function *func, double *stackpos, cairo_t *cr, uint8_t flags, double t_start, double t_end, double xi, double yi, double min_dt) {
+void draw_function_constant_ds_rec(function *func, file_data *fd, cairo_t *cr, uint8_t flags, double t_start, double t_end, double xi, double yi, double min_dt) {
     double x, y, xp, yp, dt;
-    if (t_end - t_start < min_dt) return;
+    //printf("t_end %f, t_start %f, min_dt %f\n", t_end, t_start, min_dt);
+    if (t_end - t_start < min_dt) {
+        //printf("Returning due to minimum dt\n");
+        return;
+    }
+    double *stackpos = fd->stack + fd->n_stack;
+    double *lstackpos = fd->lstack;
     //printf("recursive step from %f to %f, flags %02x\n", t_start, t_end, flags);
     if (flags & 0x01) {
         // If the lower point is in-bounds, start from there and go up
@@ -178,7 +200,7 @@ void draw_function_constant_ds_rec(function *func, double *stackpos, cairo_t *cr
             if (!IN_BOUNDS(x, y)) {
                 // Leaving the bounds, so iterate on [t, t_end]
                 cairo_stroke(cr);
-                draw_function_constant_ds_rec(func, stackpos, cr, (flags & 0x02), t_start, t_end, x, y, min_dt);
+                draw_function_constant_ds_rec(func, fd, cr, (flags & 0x02), t_start, t_end, x, y, min_dt);
                 break;
             }
         }
@@ -200,11 +222,30 @@ void draw_function_constant_ds_rec(function *func, double *stackpos, cairo_t *cr
             if (!IN_BOUNDS(x, y)) {
                 // Leaving the bounds, so iterate on [t, t_end]
                 cairo_stroke(cr);
-                draw_function_constant_ds_rec(func, stackpos, cr, (flags & 0x01), t_start, t_end, x, y, min_dt);
+                draw_function_constant_ds_rec(func, fd, cr, (flags & 0x01), t_start, t_end, x, y, min_dt);
                 break;
             }
         }
         cairo_stroke(cr);
+    } else if (func->inter) {
+        double tempdata[2] = {t_start, t_end};
+        eval_inter(tempdata, func, stackpos, lstackpos);
+        //printf("Neither point in bounds for [%f, %f] but the interval is ([%f, %f], [%f, %f])\n", t_start, t_end, lstackpos[0], stackpos[0], lstackpos[1], stackpos[1]);
+        if ((lstackpos[1] > window_y1) || (stackpos[1] < window_y0) || (lstackpos[0] > window_x1) || (stackpos[0] < window_x0)) return;
+        // If neither point is in-bounds, subdivide and iterate
+        double t_avg = (t_end + t_start)/2;
+        eval_func(t_avg, &x, &y, func, stackpos);
+        if (hypot((x - xi)*xscale, (y - yi)*yscale) < MAX_ARC_LENGTH) return;
+        //printf("Neither point in bounds on interval %f, %f -> (%f, %f), (%f, %f), %d\n", t_start, t_end, x, y, xi, yi, IN_BOUNDS(x, y));
+        if (IN_BOUNDS(x, y)) {
+            // [t_start, t_avg]
+            draw_function_constant_ds_rec(func, fd, cr, (flags & 0x01) | 0x02, t_start, t_avg, x, y, min_dt);
+            // [t_avg, t_end]
+            draw_function_constant_ds_rec(func, fd, cr, (flags & 0x02) | 0x01, t_avg, t_end, x, y, min_dt);
+        } else {
+            draw_function_constant_ds_rec(func, fd, cr, (flags & 0x01), t_start, t_avg, x, y, min_dt);
+            draw_function_constant_ds_rec(func, fd, cr, (flags & 0x02), t_avg, t_end, x, y, min_dt);
+        }
     } else {
         // If neither point is in-bounds, subdivide and iterate
         double t_avg = (t_end + t_start)/2;
@@ -213,35 +254,36 @@ void draw_function_constant_ds_rec(function *func, double *stackpos, cairo_t *cr
         //printf("Neither point in bounds on interval %f, %f -> (%f, %f), (%f, %f), %d\n", t_start, t_end, x, y, xi, yi, IN_BOUNDS(x, y));
         if (IN_BOUNDS(x, y)) {
             // [t_start, t_avg]
-            draw_function_constant_ds_rec(func, stackpos, cr, (flags & 0x01) | 0x02, t_start, t_avg, x, y, min_dt);
+            draw_function_constant_ds_rec(func, fd, cr, (flags & 0x01) | 0x02, t_start, t_avg, x, y, min_dt);
             // [t_avg, t_end]
-            draw_function_constant_ds_rec(func, stackpos, cr, (flags & 0x02) | 0x01, t_avg, t_end, x, y, min_dt);
+            draw_function_constant_ds_rec(func, fd, cr, (flags & 0x02) | 0x01, t_avg, t_end, x, y, min_dt);
         } else {
-            draw_function_constant_ds_rec(func, stackpos, cr, (flags & 0x01), t_start, t_avg, x, y, min_dt);
-            draw_function_constant_ds_rec(func, stackpos, cr, (flags & 0x02), t_avg, t_end, x, y, min_dt);
+            draw_function_constant_ds_rec(func, fd, cr, (flags & 0x01), t_start, t_avg, x, y, min_dt);
+            draw_function_constant_ds_rec(func, fd, cr, (flags & 0x02), t_avg, t_end, x, y, min_dt);
         }
     }
 }
 
-void draw_function_constant_ds(function *func, double *stackpos, uint8_t *color, cairo_t *cr) {
+void draw_function_constant_ds(function *func, file_data *fd, uint8_t *color, cairo_t *cr) {
     SET_COLOR(cr, color);
     double x, y, xp, yp, dt, t, t_end;
+    double *stackpos = fd->stack + fd->n_stack;
     t = 0;
     t_end = 1;
     double min_dt = MIN_DT;
     if ((eval_func(0, &xp, &yp, func, stackpos) & TYPE_MASK) != TYPE_POINT) {
         t = window_x0;
         t_end = window_x1;
-        min_dt = MAX_ARC_LENGTH;
+        min_dt = MAX_ARC_LENGTH/xscale;
     }
     nfev = 0;
+    niev = 0;
     uint8_t flags = 0;
     eval_func(t, &xp, &yp, func, stackpos);
     if (IN_BOUNDS(xp, yp)) flags |= 0x01;
     eval_func(t_end, &x, &y, func, stackpos);
     if (IN_BOUNDS(x, y)) flags |= 0x02;
-    draw_function_constant_ds_rec(func, stackpos, cr, flags, t, t_end, xp, yp, min_dt);
-    printf("Parametric evaluation completed in %d steps\n", nfev);
+    draw_function_constant_ds_rec(func, fd, cr, flags, t, t_end, xp, yp, min_dt);
 }
 
 static gboolean button_press_callback (GtkWidget *event_box, GdkEventButton *event, gpointer data) {
@@ -260,6 +302,7 @@ static gboolean button_release_callback (GtkWidget *event_box, GdkEventButton *e
 }
 
 gboolean redraw_all(GtkWidget *widget, cairo_t *cr, gpointer data_pointer) {
+    file_data *fd = (file_data*)(data_pointer);
     cairo_set_source_rgb(cr, COLOR_MAJOR_GRID/256.0, COLOR_MAJOR_GRID/256.0, COLOR_MAJOR_GRID/256.0);
     cairo_set_line_width(cr, 1.0);
     
@@ -316,10 +359,10 @@ gboolean redraw_all(GtkWidget *widget, cairo_t *cr, gpointer data_pointer) {
 
 
     double pt_x, pt_y, pt_x1, pt_y1;
-    expression *expression_list = fd.expression_list, *expr;
-    double *stack = fd.stack;
-    uint32_t n_stack = fd.n_stack;
-    for (int i=0; i < fd.n_expr; i++) {
+    expression *expression_list = fd->expression_list, *expr;
+    double *stack = fd->stack;
+    uint32_t n_stack = fd->n_stack;
+    for (int i=0; i < fd->n_expr; i++) {
         expr = expression_list+i;
         if (expr->flags & EXPRESSION_PLOTTABLE) {
             if ((expr->flags & EXPRESSION_FIXED) && ((expr->value_type & TYPE_MASK) == TYPE_POINT)) {
@@ -375,11 +418,13 @@ gboolean redraw_all(GtkWidget *widget, cairo_t *cr, gpointer data_pointer) {
             } else {
 #ifdef DEBUG_PLOT
                 t3 = clock();
+                nfev = 0;
+                niev = 0;
 #endif
-                draw_function_constant_ds(expression_list[i].func, stack+n_stack, expr->color, cr);
+                draw_function_constant_ds(expression_list[i].func, fd, expr->color, cr);
 #ifdef DEBUG_PLOT
                 t4 = clock();
-                printf("Plotted expression %p (%d) in %luus\n", expression_list+i, i+1, t4-t3);
+                printf("Plotted expression %p (%d) in %luus, nfev: %d, niev: %d, interval function %p\n", expression_list+i, i+1, t4-t3, nfev, niev, expression_list[i].func->inter);
 #endif
             }
         }
@@ -411,7 +456,7 @@ static gboolean scroll_callback (GtkWidget *event_box, GdkEventScroll *event, gp
     }
 
     if (redraw) {
-        gtk_widget_queue_draw(data_pointer);
+        gtk_widget_queue_draw(((file_data*)(data_pointer))->drawing_area);
     }
     return TRUE;
 }
@@ -424,7 +469,7 @@ static gboolean motion_callback(GtkWidget *event_box, GdkEventMotion *event, gpo
         click_x = event->x;
         click_y = event->y;
         uint8_t color[4] = {255, 255, 255, 0};
-        gtk_widget_queue_draw(data_pointer);
+        gtk_widget_queue_draw(((file_data*)(data_pointer))->drawing_area);
     }
     return TRUE;
 }
@@ -433,12 +478,13 @@ static gboolean timeout_callback(gpointer data_pointer) {
     // variable 5 is alpha, expression 3 is alpha definition
     printf("timeout_callback\n");
     clock_t t3 = clock();
-    fd.expression_list[ticker_target].func->oper(fd.expression_list[ticker_target].func, (fd.stack)+(fd.n_stack));
+    file_data *fd = (file_data*)(data_pointer);
+    fd->expression_list[ticker_target].func->oper(fd->expression_list[ticker_target].func, (fd->stack)+(fd->n_stack));
     expression *expr = top_expr;
     expression *from = NULL;
     while (expr) {
         if ((expr->var) && (expr->var->new_pointer)) {
-            printf("expression %p (offset %ld) has changed, expr->var %p\n", expr, expr - (fd.expression_list) + 1, expr->var);
+            printf("expression %p (offset %ld) has changed, expr->var %p\n", expr, expr - (fd->expression_list) + 1, expr->var);
             if (!from) from = expr;
             expr->var->pointer = expr->var->new_pointer;
             expr->var->type = expr->var->new_type;
@@ -451,10 +497,10 @@ static gboolean timeout_callback(gpointer data_pointer) {
     }
     if (from) {
         printf("evaluating from %p\n", from);
-        evaluate_from(&fd, from);
+        evaluate_from(fd, from);
         clock_t t4 = clock();
         printf("Total evaluation time: %luus\n", t4-t3);
-        gtk_widget_queue_draw(data_pointer);
+        gtk_widget_queue_draw(fd->drawing_area);
     }
     if (run_ticker) return TRUE;
     return FALSE;
@@ -496,6 +542,7 @@ static void activate (GtkApplication *app, gpointer user_data) {
     GtkWidget *window;
     GtkWidget *event_box;
     GtkWidget *image;
+    file_data *fd = (file_data*)(user_data);
 
     window = gtk_application_window_new (app);
     event_box = gtk_event_box_new();
@@ -508,11 +555,12 @@ static void activate (GtkApplication *app, gpointer user_data) {
 
     GtkWidget *drawing_area = gtk_drawing_area_new();
     gtk_widget_set_size_request(drawing_area, WIDTH, HEIGHT);
-    g_signal_connect(G_OBJECT(event_box), "button_press_event", G_CALLBACK(button_press_callback), drawing_area);
-    g_signal_connect(G_OBJECT(event_box), "button_release_event", G_CALLBACK(button_release_callback), drawing_area);
-    g_signal_connect(G_OBJECT(event_box), "scroll_event", G_CALLBACK(scroll_callback), drawing_area);
-    g_signal_connect(G_OBJECT(event_box), "motion-notify-event", G_CALLBACK(motion_callback), drawing_area);
-    g_signal_connect(G_OBJECT(drawing_area), "draw", G_CALLBACK(redraw_all), drawing_area);
+    fd->drawing_area = drawing_area;
+    g_signal_connect(G_OBJECT(event_box), "button_press_event", G_CALLBACK(button_press_callback), fd);
+    g_signal_connect(G_OBJECT(event_box), "button_release_event", G_CALLBACK(button_release_callback), fd);
+    g_signal_connect(G_OBJECT(event_box), "scroll_event", G_CALLBACK(scroll_callback), fd);
+    g_signal_connect(G_OBJECT(event_box), "motion-notify-event", G_CALLBACK(motion_callback), fd);
+    g_signal_connect(G_OBJECT(drawing_area), "draw", G_CALLBACK(redraw_all), fd);
     g_signal_connect(window, "key-press-event", G_CALLBACK(keypress_callback), drawing_area);
     gtk_container_add(GTK_CONTAINER(event_box), drawing_area);
 
@@ -532,6 +580,7 @@ int main (int argc, char **argv) {
     fd.variable_list = variable_list;
     fd.function_list = function_list;
     fd.stack = stack;
+    fd.lstack = lstack;
     fd.n_expr = 0;
     fd.n_var = 3;
     fd.n_func = 0;
@@ -553,7 +602,7 @@ int main (int argc, char **argv) {
 
 
     app = gtk_application_new("org.gtk.example", G_APPLICATION_DEFAULT_FLAGS);
-    g_signal_connect(app, "activate", G_CALLBACK (activate), NULL);
+    g_signal_connect(app, "activate", G_CALLBACK (activate), &fd);
     for (int i=4; i < argc; i++) argv[i-3] = argv[i];
     status = g_application_run(G_APPLICATION (app), argc-3, argv);
     g_object_unref (app);

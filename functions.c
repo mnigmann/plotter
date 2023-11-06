@@ -1,6 +1,7 @@
 #include "functions.h"
 #include "parse.h"
 #include "config.h"
+#include "intervals.h"
 #include <stdint.h>
 #include <math.h>
 #include <stdio.h>
@@ -16,12 +17,12 @@
 #define GET_STEP(type) (step_table[(type) & TYPE_MASK])
 #define IS_TYPE(type, ref) (((type) & TYPE_MASK) == (ref))
 
-const double lanczos_table[9] = {
+const static double lanczos_table[9] = {
     0.99999999999980993, 676.5203681218851, -1259.1392167224028,
     771.32342877765313, -176.61502916214059, 12.507343278686905,
     -0.13857109526572012, 9.9843695780195716e-6, 1.5056327351493116e-7};
 
-const uint32_t step_table[8] = {1, 2, 3, 1, 1, MAX_POLYGON_SIZE*2, 0, 0};
+const static uint32_t step_table[8] = {1, 2, 3, 1, 1, MAX_POLYGON_SIZE*2, 0, 0};
 
 
 uint32_t func_general_one_arg(void *f, double *stackpos, double (*oper)(double)) {
@@ -1300,47 +1301,47 @@ uint32_t func_length(void *f, double *stackpos) {
 
 #define N_OPERATORS 37
 const oper_data oper_list[N_OPERATORS] = {
-    {func_value, "func_value"},
+    {func_value, "func_value", interval_value},
 
-    {func_div, "func_div"},
-    {func_floor, "func_floor"},
-    {func_mod, "func_mod"},
-    {func_max, "func_max"},
-    {func_sine, "func_sine"},
-    {func_cosine, "func_cosine"},
-    {func_arctan, "func_arctan"},
-    {func_log, "func_log"},
-    {func_exp, "func_exp"},
-    {func_factorial, "func_factorial"},
-    {func_abs, "func_abs"},
-    {func_add, "func_add"},
-    {func_multiply, "func_multiply"},
-    {func_exponentiate, "func_exponentiate"},
-    {func_user_defined, "func_user_defined"},
+    {func_div, "func_div", interval_div},
+    {func_floor, "func_floor", NULL},
+    {func_mod, "func_mod", NULL},
+    {func_max, "func_max", NULL},
+    {func_sine, "func_sine", interval_sine},
+    {func_cosine, "func_cosine", interval_cosine},
+    {func_arctan, "func_arctan", NULL},
+    {func_log, "func_log", NULL},
+    {func_exp, "func_exp", interval_exp},
+    {func_factorial, "func_factorial", NULL},
+    {func_abs, "func_abs", NULL},
+    {func_add, "func_add", interval_add},
+    {func_multiply, "func_multiply", interval_multiply},
+    {func_exponentiate, "func_exponentiate", interval_exponentiate},
+    {func_user_defined, "func_user_defined", NULL},
 
-    {func_list, "func_list"},
-    {func_index, "func_index"},
-    {func_point, "func_point"},
-    {func_polygon, "func_polygon"},
-    {func_rgb, "func_rgb"},
-    {func_ellipsis, "func_ellipsis"},
+    {func_list, "func_list", NULL},
+    {func_index, "func_index", NULL},
+    {func_point, "func_point", interval_point},
+    {func_polygon, "func_polygon", NULL},
+    {func_rgb, "func_rgb", NULL},
+    {func_ellipsis, "func_ellipsis", NULL},
 
-    {func_for, "func_for"},
-    {func_equals, "func_equals"},
-    {func_greater, "func_greater"},
+    {func_for, "func_for", NULL},
+    {func_equals, "func_equals", NULL},
+    {func_greater, "func_greater", NULL},
 
-    {func_extract_x, "func_extract_x"},
-    {func_extract_y, "func_extract_y"},
-    {func_assign, "func_assign"},
-    {func_chain_actions, "func_chain_actions"},
-    {func_sum, "func_sum"},
-    {func_prod, "func_prod"},
-    {func_total, "func_total"},
-    {func_distance, "func_distance"},
-    {func_conditional, "func_conditional"},
-    {func_sort, "func_sort"},
-    {func_join, "func_join"},
-    {func_length, "func_length"}
+    {func_extract_x, "func_extract_x", NULL},
+    {func_extract_y, "func_extract_y", NULL},
+    {func_assign, "func_assign", NULL},
+    {func_chain_actions, "func_chain_actions", NULL},
+    {func_sum, "func_sum", NULL},
+    {func_prod, "func_prod", NULL},
+    {func_total, "func_total", NULL},
+    {func_distance, "func_distance", NULL},
+    {func_conditional, "func_conditional", NULL},
+    {func_sort, "func_sort", NULL},
+    {func_join, "func_join", NULL},
+    {func_length, "func_length", NULL}
 };
 
 const oper_data *oper_lookup(uint32_t (*ptr)(void*, double*)) {
