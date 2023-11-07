@@ -1327,7 +1327,7 @@ const oper_data oper_list[N_OPERATORS] = {
     {func_ellipsis, "func_ellipsis", NULL},
 
     {func_for, "func_for", NULL},
-    {func_equals, "func_equals", NULL},
+    {func_equals, "func_equals", interval_equals},
     {func_greater, "func_greater", NULL},
 
     {func_extract_x, "func_extract_x", NULL},

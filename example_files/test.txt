@@ -12,3 +12,4 @@ a\to a+1
 \prod_{n=1}^{6}\left(n^{2},n^{3}\right)
 \left(4,3\right)\left(7,2\right)
 \left(\frac{\cos\left(\exp\left(3x\right)\right)}{\exp\left(3x\right)},\frac{\sin\left(\exp\left(3x\right)\right)}{\exp\left(3x\right)}\right)
+x\cos\left(y\right)+y\cos\left(x\right)=0

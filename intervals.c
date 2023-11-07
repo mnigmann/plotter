@@ -24,6 +24,9 @@ const static double lanczos_table[9] = {
 #define MAX_POLYGON_SIZE 4
 const static uint32_t step_table[8] = {1, 2, 3, 1, 1, MAX_POLYGON_SIZE*2, 0, 0};
 
+/*
+ * Generic helper functions
+ */
 void apply_sign(uint8_t sign_bit, double *hstack, double *lstack, uint32_t srcpos, uint32_t len) {
     if (sign_bit & 0x80) {
         double temp;
@@ -119,6 +122,10 @@ uint32_t interval_value(void *f, double *hstackpos, double *lstackpos) {
         return type;
     }
 }
+
+/*
+ * Basic arithmetic functions
+ */
 
 uint8_t interval_add_in_place(double *hacc, double *lacc, uint32_t *result_type, uint32_t *result_length, uint32_t type) {
     uint32_t len = type>>8;
@@ -443,6 +450,15 @@ uint32_t interval_div(void *f, double *hstackpos, double *lstackpos) {
         return (result_len<<9) | ((t1 | t2) & 0xff);*/
     }
     return 0;
+}
+
+void miequals(double *hstackpos, double *lstackpos, double h, double l) {
+    hstackpos[0] -= l;
+    lstackpos[0] -= h;
+}
+
+uint32_t interval_equals(void *f, double *hstackpos, double *lstackpos) {
+    return interval_general_two_args(f, hstackpos, lstackpos, miequals);
 }
 
 void micos(double *hstackpos, double *lstackpos) {

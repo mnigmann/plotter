@@ -286,6 +286,131 @@ void draw_function_constant_ds(function *func, file_data *fd, uint8_t *color, ca
     draw_function_constant_ds_rec(func, fd, cr, flags, t, t_end, xp, yp, min_dt);
 }
 
+void draw_implicit_rec(function *func, file_data *fd, cairo_t *cr, double *area, int divisions) {
+    fd->variable_list[0].pointer = area;
+    fd->variable_list[0].type = 1<<8;
+    fd->variable_list[1].pointer = area+2;
+    fd->variable_list[1].type = 1<<8;
+    double *stackpos = fd->stack + fd->n_stack;
+    double *lstackpos = fd->lstack;
+    func->inter(func, stackpos, lstackpos);
+    niev++;
+    if ((lstackpos[0] > 0) || (stackpos[0] < 0)) {
+        // No contours can exist in the given area
+        //printf("    No contours found in ([%f, %f], [%f, %f])\n", area[0], area[1], area[2], area[3]);
+        //cairo_rectangle(cr, SCALE_XK(area[0]), SCALE_YK(area[3]), xscale*(area[1] - area[0]), yscale*(area[3] - area[2]));
+        //cairo_stroke(cr);
+        return;
+    }
+    if (divisions == IMPLICIT_MAXDEPTH) {
+        // Maximum depth reached
+        //printf("    maximum depth reached on ([%f, %f], [%f, %f]) --> [%f, %f]\n", area[0], area[1], area[2], area[3], lstackpos[0], stackpos[0]);
+        function *arg1 = func->first_arg;
+        function *arg2 = arg1->next_arg;
+        double x0 = area[0], x1 = area[1], y0 = area[2], y1 = area[3];
+        fd->variable_list[0].pointer = &x0;
+        fd->variable_list[1].pointer = &y0;
+        arg1->oper(arg1, stackpos);
+        double e00 = stackpos[0];
+        arg2->oper(arg2, stackpos);
+        e00 -= stackpos[0];
+        fd->variable_list[0].pointer = &x1;
+        fd->variable_list[1].pointer = &y0;
+        arg1->oper(arg1, stackpos);
+        double e10 = stackpos[0];
+        arg2->oper(arg2, stackpos);
+        e10 -= stackpos[0];
+        fd->variable_list[0].pointer = &x1;
+        fd->variable_list[1].pointer = &y1;
+        arg1->oper(arg1, stackpos);
+        double e11 = stackpos[0];
+        arg2->oper(arg2, stackpos);
+        e11 -= stackpos[0];
+        fd->variable_list[0].pointer = &x0;
+        fd->variable_list[1].pointer = &y1;
+        arg1->oper(arg1, stackpos);
+        double e01 = stackpos[0];
+        arg2->oper(arg2, stackpos);
+        e01 -= stackpos[0];
+        nfev += 4;
+        double npos, epos, spos, wpos;
+        uint8_t edges = 0;
+        if ((e00 != e10) && (((e00 <= 0) && (e10 >= 0)) || ((e00 >= 0) && (e10 <= 0)))) {
+            // south edge
+            edges |= 0x4;
+            spos = x0 - e00*(x1 - x0)/(e10 - e00);
+        }
+        if ((e10 != e11) && (((e10 <= 0) && (e11 >= 0)) || ((e10 >= 0) && (e11 <= 0)))) {
+            // east edge
+            edges |= 0x2;
+            epos = y0 - e10*(y1 - y0)/(e11 - e10);
+        }
+        if ((e11 != e01) && (((e11 <= 0) && (e01 >= 0)) || ((e11 >= 0) && (e01 <= 0)))) {
+            // north edge
+            edges |= 0x1;
+            npos = x0 - e01*(x0 - x1)/(e01 - e11);
+        }
+        if ((e01 != e00) && (((e01 <= 0) && (e00 >= 0)) || ((e01 >= 0) && (e00 <= 0)))) {
+            // west edge
+            edges |= 0x8;
+            wpos = y0 - e00*(y0 - y1)/(e00 - e01);
+        }
+        // If two edges are selected, then draw the line between those two edges. If three 
+        // edges are selected, then one of the corners must be zero so the contour must go
+        // through one of the corners. If four edges are selected, there are two contour
+        // lines, each going through opposite sides of the area.
+        if ((edges & 0x5) == 0x5) {
+            cairo_move_to(cr, SCALE_XK(spos), SCALE_YK(y0));
+            cairo_line_to(cr, SCALE_XK(npos), SCALE_YK(y1));
+            cairo_stroke(cr);
+            edges &= 0xa;
+        }
+        if ((edges & 0xa) == 0xa) {
+            cairo_move_to(cr, SCALE_XK(x0), SCALE_YK(wpos));
+            cairo_line_to(cr, SCALE_XK(x1), SCALE_YK(epos));
+            cairo_stroke(cr);
+            edges &= 0x5;
+        }
+        if ((edges & 0x3) == 0x3) {
+            cairo_move_to(cr, SCALE_XK(x1), SCALE_YK(epos));
+            cairo_line_to(cr, SCALE_XK(npos), SCALE_YK(y1));
+            cairo_stroke(cr);
+        } else if ((edges & 0x6) == 0x6) {
+            cairo_move_to(cr, SCALE_XK(x1), SCALE_YK(epos));
+            cairo_line_to(cr, SCALE_XK(spos), SCALE_YK(y0));
+            cairo_stroke(cr);
+        } else if ((edges & 0xc) == 0xc) {
+            cairo_move_to(cr, SCALE_XK(x0), SCALE_YK(wpos));
+            cairo_line_to(cr, SCALE_XK(spos), SCALE_YK(y0));
+            cairo_stroke(cr);
+        } else if ((edges & 0x9) == 0x9) {
+            cairo_move_to(cr, SCALE_XK(x0), SCALE_YK(wpos));
+            cairo_line_to(cr, SCALE_XK(npos), SCALE_YK(y1));
+            cairo_stroke(cr);
+        }
+
+    } else {
+        // Subdivide
+        double x0 = area[0], x1 = area[1], y0 = area[2], y1 = area[3];
+        double xm = (x0 + x1)/2, ym = (y0 + y1)/2;
+        //printf("subdividing ([%f, %f], [%f, %f]), %f, %f\n", x0, x1, y0, y1, xm, ym);
+        area[1] = xm; area[3] = ym;
+        draw_implicit_rec(func, fd, cr, area, divisions+1);
+        area[0] = xm; area[1] = x1; area[2] = y0; area[3] = ym;
+        draw_implicit_rec(func, fd, cr, area, divisions+1);
+        area[0] = x0; area[1] = xm; area[2] = ym; area[3] = y1;
+        draw_implicit_rec(func, fd, cr, area, divisions+1);
+        area[0] = xm; area[1] = x1; area[2] = ym; area[3] = y1;
+        draw_implicit_rec(func, fd, cr, area, divisions+1);
+    }
+}
+
+void draw_implicit(function *func, file_data *fd, uint8_t *color, cairo_t *cr) {
+    SET_COLOR(cr, color);
+    double temp[4] = {window_x0, window_x1, window_y0, window_y1};
+    draw_implicit_rec(func, fd, cr, temp, 0);
+}
+
 static gboolean button_press_callback (GtkWidget *event_box, GdkEventButton *event, gpointer data) {
     g_print ("Clicked at %f, %f\n", event->x, event->y);
     click_x = event->x;
@@ -415,6 +540,21 @@ gboolean redraw_all(GtkWidget *widget, cairo_t *cr, gpointer data_pointer) {
                 t4 = clock();
                 printf("Plotted polygon expression %p (%d) in %luus\n", expression_list+i, i+1, t4-t3);
 #endif
+            } else if (expr->func->oper == func_equals) {
+                if (!(expr->func->inter)) {
+                    printf("ERROR: interval function needed for implicit plotting\n");
+                    exit(EXIT_FAILURE);
+                }
+#ifdef DEBUG_PLOT
+                t3 = clock();
+                nfev = 0;
+                niev = 0;
+#endif
+                draw_implicit(expression_list[i].func, fd, expr->color, cr);
+#ifdef DEBUG_PLOT
+                t4 = clock();
+                printf("Plotted implicit expression %p (%d) in %luus, nfev: %d, niev: %d\n", expression_list+i, i+1, t4-t3, nfev, niev);
+#endif
             } else {
 #ifdef DEBUG_PLOT
                 t3 = clock();
@@ -475,7 +615,6 @@ static gboolean motion_callback(GtkWidget *event_box, GdkEventMotion *event, gpo
 }
 
 static gboolean timeout_callback(gpointer data_pointer) {
-    // variable 5 is alpha, expression 3 is alpha definition
     printf("timeout_callback\n");
     clock_t t3 = clock();
     file_data *fd = (file_data*)(data_pointer);
@@ -561,7 +700,7 @@ static void activate (GtkApplication *app, gpointer user_data) {
     g_signal_connect(G_OBJECT(event_box), "scroll_event", G_CALLBACK(scroll_callback), fd);
     g_signal_connect(G_OBJECT(event_box), "motion-notify-event", G_CALLBACK(motion_callback), fd);
     g_signal_connect(G_OBJECT(drawing_area), "draw", G_CALLBACK(redraw_all), fd);
-    g_signal_connect(window, "key-press-event", G_CALLBACK(keypress_callback), drawing_area);
+    g_signal_connect(window, "key-press-event", G_CALLBACK(keypress_callback), fd);
     gtk_container_add(GTK_CONTAINER(event_box), drawing_area);
 
     gtk_widget_show_all(window);

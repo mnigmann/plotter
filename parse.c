@@ -1633,7 +1633,7 @@ expression *parse_file(file_data *fd, char *stringbuf) {
     // Print the expression table
     for (i=0; i < n_expr; i++) {
         printf("expression pointer at %p, function %p, variable %p, flags %02x, begin %d, dep %p, num %d\n", expression_list+i, expression_list[i].func, expression_list[i].var, expression_list[i].flags, expression_list[i].expr_begin, expression_list[i].dependencies, expression_list[i].num_dependencies);
-        insert_interval_functions(expression_list[i].func);
+        if (expression_list[i].flags & EXPRESSION_PLOTTABLE) insert_interval_functions(expression_list[i].func);
     }
     
     // Print the function table
