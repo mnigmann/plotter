@@ -5,6 +5,7 @@
 #include "parse.h"
 #include "functions.h"
 #include "linalg_functions.h"
+#include "config.h"
 #include <math.h>
 
 #define N_FUNCTIONS 16
@@ -784,6 +785,61 @@ int parse_latex_rec(char *latex, int end, function *function_list, double *stack
                 function_list[last_pos+1].value = variable_list + (*var_size-1);
                 printf("parsing %.*s done, func_pos %d\n", end, latex, func_pos);
                 return func_pos;
+            } else if ((strncmp(latex+cmd_start, "int", cmd_len) == 0) && (cmd_len == 3)) {
+                // Integrals have three parts: a start value, an end value, an expression to be summed,
+                // and an integration variable (like a dx, du, dt, etc.)
+                // We assume that the entire remaining expression is the integral
+                // Structure:
+                //   1. func_integral
+                //   2. func_value, points to the variable of integration
+                //   3. func_value, points to the start
+                //   4. func_value, points to the lower bound
+                //   5. ... (expression)
+                i = cmd_end;
+                subscript = extract_braces(latex, i+1);
+                superscript = extract_braces(latex, subscript+2);
+                arg1_start = end-2;
+                if (latex[end-1] == '}') {
+                    for (int j=end-1; j > superscript; j--) {
+                        if (latex[j] == '{') {
+                            arg1_start = j-3;
+                            break;
+                        }
+                    }
+                }
+                if (latex[arg1_start] != 'd') {
+                    printf("ERROR: integrand must end in integration variable\n");
+                    exit(EXIT_FAILURE);
+                }
+                printf("Integral found, %d, %d\n", subscript, superscript);
+                printf("Variable is %.*s\n", end-arg1_start-1, latex+arg1_start+1);
+                printf("Initial value is %.*s\n", subscript-i-2, latex+i+2);
+                printf("Final value is %.*s\n", superscript-subscript-3, latex+subscript+3);
+                last_pos = func_pos;
+                function_list[func_pos] = new_function(func_integrate, NULL, function_list+func_pos+1);
+                func_pos++;
+                // Value block for the variable of intgration
+                function_list[func_pos] = new_value(NULL, 0x40, function_list+func_pos+1);
+                func_pos++;
+                // Parse the lower bound
+                int prev = func_pos;
+                func_pos += PARSE_LATEX_REC(latex+i+2, subscript-i-2, function_list+func_pos);
+                function_list[prev].next_arg = function_list + func_pos;
+                // Parse the upper bound
+                prev = func_pos;
+                func_pos += PARSE_LATEX_REC(latex+subscript+3, superscript-subscript-3, function_list+func_pos);
+                function_list[prev].next_arg = function_list + func_pos;
+                // Create a new variable for the summation index
+                strncpy(stringbuf + *string_size, latex+arg1_start+1, end-arg1_start-1);
+                variable_list[*var_size] = new_variable(stringbuf + *string_size, 0, VARIABLE_IN_SCOPE, NULL);
+                *string_size += arg1_end-1;
+                *var_size += 1;
+                // Parse the expression
+                func_pos += PARSE_LATEX_REC(latex+superscript+1, arg1_start-superscript-1, function_list+func_pos);
+                variable_list[*var_size-1].flags &= ~VARIABLE_IN_SCOPE;
+                function_list[last_pos+1].value = variable_list + (*var_size-1);
+                printf("parsing %.*s done, func_pos %d\n", end, latex, func_pos);
+                return func_pos;
             } else if ((cmd_len == 12) && (strncmp(latex+cmd_start, "operatorname", cmd_len) == 0)) {
                 arg1_end = extract_braces(latex, cmd_start+12);
                 oper = NULL;
@@ -1510,10 +1566,10 @@ expression *parse_file(file_data *fd, char *stringbuf) {
                                 arg++;
                             }
                         }
-                        if (!already_exists && ((line[j] == 'x') || (line[j] == 'y'))) {
+                        /*if (!already_exists && ((line[j] == 'x') || (line[j] == 'y'))) {
                             exprpos->flags |= EXPRESSION_PLOTTABLE;
                             exprpos->flags &= ~EXPRESSION_FIXED;
-                        }
+                        }*/
                     }
                     
                     j = subscript-1;
@@ -1573,6 +1629,10 @@ expression *parse_file(file_data *fd, char *stringbuf) {
                 if (function_list[p].oper == func_assign) {
                     exprpos->flags |= EXPRESSION_ACTION;
                     break;
+                }
+                if ((function_list[p].oper == func_value) && ((function_list[p].value == variable_list) || (function_list[p].value == variable_list+1))) {
+                    exprpos->flags |= EXPRESSION_PLOTTABLE;
+                    exprpos->flags &= ~EXPRESSION_FIXED;
                 }
             }
             if (exprpos->flags & EXPRESSION_ACTION) {
@@ -1680,6 +1740,9 @@ expression *parse_file(file_data *fd, char *stringbuf) {
         exit(EXIT_FAILURE);
     }
     printf("\n");
+
+    for (i=0; variable_list+i < varpos; i++)
+        printf("%s variable pointer at %p, points to %p, type %08X, flags %02X, new_pointer %p\n", variable_list[i].name, variable_list+i, variable_list[i].pointer, variable_list[i].type, variable_list[i].flags, variable_list[i].new_pointer);
     
     // Evaluate all variables in accordance with the topological ordering
     printf("stack_size is %d\n", stack_size);
@@ -1691,9 +1754,6 @@ expression *parse_file(file_data *fd, char *stringbuf) {
     fd->n_stack = stack_size;
     evaluate_from(fd, top_expr);
 
-
-    for (i=0; variable_list+i < varpos; i++)
-        printf("%s variable pointer at %p, points to %p, type %08X, flags %02X, new_pointer %p\n", variable_list[i].name, variable_list+i, variable_list[i].pointer, variable_list[i].type, variable_list[i].flags, variable_list[i].new_pointer);
 
     *n_func = func_pos;
     *n_var = varpos - variable_list;

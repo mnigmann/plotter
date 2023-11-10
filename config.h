@@ -16,6 +16,7 @@
 #define MAX_ARC_LENGTH 3
 #define MIN_DT 1e-3
 #define IMPLICIT_MAXDEPTH 8
+#define USE_INEQUALITY
 
 #define PI 3.14159265359
 #define SCROLL_AMOUNT 1.1

@@ -9,6 +9,7 @@ uint32_t interval_multiply(void *f, double *hstackpos, double *lstackpos);
 uint32_t interval_div(void *f, double *hstackpos, double *lstackpos);
 uint32_t interval_exponentiate(void *f, double *hstackpos, double *lstackpos);
 uint32_t interval_equals(void *f, double *hstackpos, double *lstackpos);
+uint32_t interval_greater(void *f, double *hstackpos, double *lstackpos);
 
 uint32_t interval_sine(void *f, double *hstackpos, double *lstackpos);
 uint32_t interval_cosine(void *f, double *hstackpos, double *lstackpos);

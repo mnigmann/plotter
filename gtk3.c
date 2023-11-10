@@ -22,6 +22,7 @@
 #define CLIP_HEIGHT(v) (v<0 ? 0 : (v>HEIGHT ? HEIGHT : v))
 #define IN_BOUNDS(x, y) ((window_x0 <= x) && (x <= window_x1) && (window_y0 <= y) && (y <= window_y1))
 #define SET_COLOR(cr, color) cairo_set_source_rgb(cr, color[0]/256.0, color[1]/256.0, color[2]/256.0)
+#define SET_COLOR_OPACITY(cr, color, opacity) cairo_set_source_rgba(cr, color[0]/256.0, color[1]/256.0, color[2]/256.0, opacity)
 
 #define TOIDX(x, y) (3*(x + y*WIDTH))
 
@@ -286,7 +287,7 @@ void draw_function_constant_ds(function *func, file_data *fd, uint8_t *color, ca
     draw_function_constant_ds_rec(func, fd, cr, flags, t, t_end, xp, yp, min_dt);
 }
 
-void draw_implicit_rec(function *func, file_data *fd, cairo_t *cr, double *area, int divisions) {
+void draw_implicit_rec(function *func, file_data *fd, cairo_t *cr, uint8_t *color, double *area, int divisions) {
     fd->variable_list[0].pointer = area;
     fd->variable_list[0].type = 1<<8;
     fd->variable_list[1].pointer = area+2;
@@ -295,7 +296,19 @@ void draw_implicit_rec(function *func, file_data *fd, cairo_t *cr, double *area,
     double *lstackpos = fd->lstack;
     func->inter(func, stackpos, lstackpos);
     niev++;
-    if ((lstackpos[0] > 0) || (stackpos[0] < 0)) {
+    if (lstackpos[0] > 0) {
+        // Everything in the interval is greater than zero
+#ifdef USE_INEQUALITY
+        if (func->oper == func_greater) {
+            SET_COLOR_OPACITY(cr, color, 0.5);
+            cairo_rectangle(cr, SCALE_XK(area[0]), SCALE_YK(area[3]), xscale*(area[1] - area[0]), yscale*(area[3] - area[2]));
+            cairo_fill(cr);
+            SET_COLOR_OPACITY(cr, color, 1);
+        }
+#endif
+        return;
+    }
+    if (stackpos[0] < 0) {
         // No contours can exist in the given area
         //printf("    No contours found in ([%f, %f], [%f, %f])\n", area[0], area[1], area[2], area[3]);
         //cairo_rectangle(cr, SCALE_XK(area[0]), SCALE_YK(area[3]), xscale*(area[1] - area[0]), yscale*(area[3] - area[2]));
@@ -305,6 +318,8 @@ void draw_implicit_rec(function *func, file_data *fd, cairo_t *cr, double *area,
     if (divisions == IMPLICIT_MAXDEPTH) {
         // Maximum depth reached
         //printf("    maximum depth reached on ([%f, %f], [%f, %f]) --> [%f, %f]\n", area[0], area[1], area[2], area[3], lstackpos[0], stackpos[0]);
+        //cairo_rectangle(cr, SCALE_XK(area[0]), SCALE_YK(area[3]), xscale*(area[1] - area[0]), yscale*(area[3] - area[2]));
+        //cairo_stroke(cr);
         function *arg1 = func->first_arg;
         function *arg2 = arg1->next_arg;
         double x0 = area[0], x1 = area[1], y0 = area[2], y1 = area[3];
@@ -333,6 +348,20 @@ void draw_implicit_rec(function *func, file_data *fd, cairo_t *cr, double *area,
         arg2->oper(arg2, stackpos);
         e01 -= stackpos[0];
         nfev += 4;
+
+        if ((e00 > 0) && (e10 > 0) && (e11 > 0) && (e01 > 0)) {
+            // Interval calculation was wrong
+#ifdef USE_INEQUALITY
+            if (func->oper == func_greater) {
+                SET_COLOR_OPACITY(cr, color, 0.5);
+                cairo_rectangle(cr, SCALE_XK(area[0]), SCALE_YK(area[3]), xscale*(area[1] - area[0]), yscale*(area[3] - area[2]));
+                cairo_fill(cr);
+                SET_COLOR_OPACITY(cr, color, 1);
+            }
+#endif
+            return;
+        }
+
         double npos, epos, spos, wpos;
         uint8_t edges = 0;
         if ((e00 != e10) && (((e00 <= 0) && (e10 >= 0)) || ((e00 >= 0) && (e10 <= 0)))) {
@@ -359,56 +388,199 @@ void draw_implicit_rec(function *func, file_data *fd, cairo_t *cr, double *area,
         // edges are selected, then one of the corners must be zero so the contour must go
         // through one of the corners. If four edges are selected, there are two contour
         // lines, each going through opposite sides of the area.
-        if ((edges & 0x5) == 0x5) {
-            cairo_move_to(cr, SCALE_XK(spos), SCALE_YK(y0));
-            cairo_line_to(cr, SCALE_XK(npos), SCALE_YK(y1));
-            cairo_stroke(cr);
-            edges &= 0xa;
+        double sx0 = SCALE_XK(x0), sx1 = SCALE_XK(x1), sy0 = SCALE_YK(y0), sy1 = SCALE_YK(y1);
+        double snpos = SCALE_XK(npos), sepos = SCALE_YK(epos), sspos = SCALE_XK(spos), swpos = SCALE_YK(wpos);
+        // If the contout passes through two corners, only draw one line
+        if ((edges == 0xf) && (((e00 == 0) && (e11 == 0)) || ((e10 == 0) && (e01 == 0)))) edges = 0x5;
+        switch (edges) {
+            case 0xf:
+                // If all four edges are selected, we know that all of the corners have
+                // different values from their neighbors. No more than two corners can
+                // be zero and they must be on opposite corners. If we sample two adjacent
+                // corners, at least one will not be zero
+#ifdef USE_INEQUALITY
+                if (func->oper == func_greater) {
+                    SET_COLOR_OPACITY(cr, color, 0.5);
+                    if ((e00 > 0) || (e10 < 0)) {
+                        cairo_move_to(cr, sx0, sy0);
+                        cairo_line_to(cr, sspos, sy0);
+                        cairo_line_to(cr, snpos, sy1);
+                        cairo_line_to(cr, sx1, sy1);
+                        cairo_line_to(cr, sx1, sepos);
+                        cairo_line_to(cr, sx0, swpos);
+                    } else {
+                        cairo_move_to(cr, sx1, sy0);
+                        cairo_line_to(cr, sspos, sy0);
+                        cairo_line_to(cr, snpos, sy1);
+                        cairo_line_to(cr, sx0, sy1);
+                        cairo_line_to(cr, sx0, sepos);
+                        cairo_line_to(cr, sx1, swpos);
+                    }
+                    cairo_close_path(cr);
+                    cairo_fill(cr);
+                }
+                SET_COLOR_OPACITY(cr, color, 1);
+#endif
+                cairo_move_to(cr, sspos, sy0);
+                cairo_line_to(cr, snpos, sy1);
+                cairo_stroke(cr);
+                cairo_move_to(cr, sx0, swpos);
+                cairo_line_to(cr, sx1, sepos);
+                cairo_stroke(cr);
+                break;
+            case 0x7:
+            case 0xd:
+            case 0x5:
+                cairo_move_to(cr, sspos, sy0);
+                cairo_line_to(cr, snpos, sy1);
+#ifdef USE_INEQUALITY
+                if (func->oper == func_greater) {
+                    cairo_stroke_preserve(cr);
+                    SET_COLOR_OPACITY(cr, color, 0.5);
+                    if ((e00 > 0) || (e10 < 0)) {
+                        cairo_line_to(cr, sx0, sy1);
+                        cairo_line_to(cr, sx0, sy0);
+                    } else {
+                        cairo_line_to(cr, sx1, sy1);
+                        cairo_line_to(cr, sx1, sy0);
+                    }
+                    cairo_close_path(cr);
+                    cairo_fill(cr);
+                    SET_COLOR_OPACITY(cr, color, 1);
+                } else
+#endif
+                cairo_stroke(cr);
+                break;
+            case 0xb:
+            case 0xe:
+            case 0xa:
+                cairo_move_to(cr, sx0, swpos);
+                cairo_line_to(cr, sx1, sepos);
+#ifdef USE_INEQUALITY
+                if (func->oper == func_greater) {
+                    cairo_stroke_preserve(cr);
+                    SET_COLOR_OPACITY(cr, color, 0.5);
+                    if ((e00 > 0) || (e01 < 0)) {
+                        cairo_line_to(cr, sx1, sy0);
+                        cairo_line_to(cr, sx0, sy0);
+                    } else {
+                        cairo_line_to(cr, sx1, sy1);
+                        cairo_line_to(cr, sx0, sy1);
+                    }
+                    cairo_close_path(cr);
+                    cairo_fill(cr);
+                    SET_COLOR_OPACITY(cr, color, 1);
+                } else
+#endif
+                cairo_stroke(cr);
+                break;
+            case 0x3:
+                cairo_move_to(cr, sx1, sepos);
+                cairo_line_to(cr, snpos, sy1);
+#ifdef USE_INEQUALITY
+                if (func->oper == func_greater) {
+                    cairo_stroke_preserve(cr);
+                    SET_COLOR_OPACITY(cr, color, 0.5);
+                    if ((e11 > 0) || (e01 < 0)) {
+                        cairo_line_to(cr, sx1, sy1);
+                    } else {
+                        cairo_line_to(cr, sx0, sy1);
+                        cairo_line_to(cr, sx0, sy0);
+                        cairo_line_to(cr, sx1, sy0);
+                    }
+                    cairo_close_path(cr);
+                    cairo_fill(cr);
+                    SET_COLOR_OPACITY(cr, color, 1);
+                } else
+#endif
+                cairo_stroke(cr);
+                break;
+            case 0x6:
+                cairo_move_to(cr, sx1, sepos);
+                cairo_line_to(cr, sspos, sy0);
+#ifdef USE_INEQUALITY
+                if (func->oper == func_greater) {
+                    cairo_stroke_preserve(cr);
+                    SET_COLOR_OPACITY(cr, color, 0.5);
+                    if ((e10 > 0) || (e00 < 0)) {
+                        cairo_line_to(cr, sx1, sy0);
+                    } else {
+                        cairo_line_to(cr, sx0, sy0);
+                        cairo_line_to(cr, sx0, sy1);
+                        cairo_line_to(cr, sx1, sy1);
+                    }
+                    cairo_close_path(cr);
+                    cairo_fill(cr);
+                    SET_COLOR_OPACITY(cr, color, 1);
+                } else
+#endif
+                cairo_stroke(cr);
+                break;
+            case 0xc:
+                cairo_move_to(cr, sx0, swpos);
+                cairo_line_to(cr, sspos, sy0);
+#ifdef USE_INEQUALITY
+                if (func->oper == func_greater) {
+                    cairo_stroke_preserve(cr);
+                    SET_COLOR_OPACITY(cr, color, 0.5);
+                    if ((e10 < 0) || (e00 > 0)) {
+                        cairo_line_to(cr, sx0, sy0);
+                    } else {
+                        cairo_line_to(cr, sx1, sy0);
+                        cairo_line_to(cr, sx1, sy1);
+                        cairo_line_to(cr, sx0, sy1);
+                    }
+                    cairo_close_path(cr);
+                    cairo_fill(cr);
+                    SET_COLOR_OPACITY(cr, color, 1);
+                } else
+#endif
+                cairo_stroke(cr);
+                break;
+            case 0x9:
+                cairo_move_to(cr, sx0, swpos);
+                cairo_line_to(cr, snpos, sy1);
+#ifdef USE_INEQUALITY
+                if (func->oper == func_greater) {
+                    cairo_stroke_preserve(cr);
+                    SET_COLOR_OPACITY(cr, color, 0.5);
+                    if ((e01 > 0) || (e00 < 0)) {
+                        cairo_line_to(cr, sx0, sy1);
+                    } else {
+                        cairo_line_to(cr, sx1, sy1);
+                        cairo_line_to(cr, sx1, sy0);
+                        cairo_line_to(cr, sx0, sy0);
+                    }
+                    cairo_close_path(cr);
+                    cairo_fill(cr);
+                    SET_COLOR_OPACITY(cr, color, 1);
+                } else
+#endif
+                cairo_stroke(cr);
+                break;
+            default:
+                break;
         }
-        if ((edges & 0xa) == 0xa) {
-            cairo_move_to(cr, SCALE_XK(x0), SCALE_YK(wpos));
-            cairo_line_to(cr, SCALE_XK(x1), SCALE_YK(epos));
-            cairo_stroke(cr);
-            edges &= 0x5;
-        }
-        if ((edges & 0x3) == 0x3) {
-            cairo_move_to(cr, SCALE_XK(x1), SCALE_YK(epos));
-            cairo_line_to(cr, SCALE_XK(npos), SCALE_YK(y1));
-            cairo_stroke(cr);
-        } else if ((edges & 0x6) == 0x6) {
-            cairo_move_to(cr, SCALE_XK(x1), SCALE_YK(epos));
-            cairo_line_to(cr, SCALE_XK(spos), SCALE_YK(y0));
-            cairo_stroke(cr);
-        } else if ((edges & 0xc) == 0xc) {
-            cairo_move_to(cr, SCALE_XK(x0), SCALE_YK(wpos));
-            cairo_line_to(cr, SCALE_XK(spos), SCALE_YK(y0));
-            cairo_stroke(cr);
-        } else if ((edges & 0x9) == 0x9) {
-            cairo_move_to(cr, SCALE_XK(x0), SCALE_YK(wpos));
-            cairo_line_to(cr, SCALE_XK(npos), SCALE_YK(y1));
-            cairo_stroke(cr);
-        }
-
     } else {
         // Subdivide
         double x0 = area[0], x1 = area[1], y0 = area[2], y1 = area[3];
         double xm = (x0 + x1)/2, ym = (y0 + y1)/2;
         //printf("subdividing ([%f, %f], [%f, %f]), %f, %f\n", x0, x1, y0, y1, xm, ym);
         area[1] = xm; area[3] = ym;
-        draw_implicit_rec(func, fd, cr, area, divisions+1);
+        draw_implicit_rec(func, fd, cr, color, area, divisions+1);
         area[0] = xm; area[1] = x1; area[2] = y0; area[3] = ym;
-        draw_implicit_rec(func, fd, cr, area, divisions+1);
+        draw_implicit_rec(func, fd, cr, color, area, divisions+1);
         area[0] = x0; area[1] = xm; area[2] = ym; area[3] = y1;
-        draw_implicit_rec(func, fd, cr, area, divisions+1);
+        draw_implicit_rec(func, fd, cr, color, area, divisions+1);
         area[0] = xm; area[1] = x1; area[2] = ym; area[3] = y1;
-        draw_implicit_rec(func, fd, cr, area, divisions+1);
+        draw_implicit_rec(func, fd, cr, color, area, divisions+1);
     }
 }
 
 void draw_implicit(function *func, file_data *fd, uint8_t *color, cairo_t *cr) {
     SET_COLOR(cr, color);
     double temp[4] = {window_x0, window_x1, window_y0, window_y1};
-    draw_implicit_rec(func, fd, cr, temp, 0);
+    draw_implicit_rec(func, fd, cr, color, temp, 0);
 }
 
 static gboolean button_press_callback (GtkWidget *event_box, GdkEventButton *event, gpointer data) {
@@ -446,9 +618,8 @@ gboolean redraw_all(GtkWidget *widget, cairo_t *cr, gpointer data_pointer) {
     int64_t xk;
     while (decadex > 0) {decadex--; ticksize *= 10;}
     while (decadex < 0) {decadex++; ticksize /= 10;}
-    double x0_scaled = ticksize*((int64_t)(window_x0/ticksize));
-    double x1_scaled = ticksize*((int64_t)(window_x1/ticksize));
-    for (double tick=x0_scaled; tick <= x1_scaled; tick+=ticksize) {
+    double x0_scaled = ticksize*floor(window_x0/ticksize);
+    for (double tick=x0_scaled; tick <= window_x1; tick+=ticksize) {
         cairo_move_to(cr, SCALE_XK(tick), 0);
         cairo_line_to(cr, SCALE_XK(tick), HEIGHT);
     }
@@ -462,9 +633,8 @@ gboolean redraw_all(GtkWidget *widget, cairo_t *cr, gpointer data_pointer) {
     ticksize = basey;
     while (decadey > 0) {decadey--; ticksize *= 10;}
     while (decadey < 0) {decadey++; ticksize /= 10;}
-    double y0_scaled = ticksize*((int64_t)(window_y0/ticksize));
-    double y1_scaled = ticksize*((int64_t)(window_y1/ticksize));
-    for (double tick=y0_scaled; tick <= y1_scaled; tick+=ticksize) {
+    double y0_scaled = ticksize*floor(window_y0/ticksize);
+    for (double tick=y0_scaled; tick <= window_y1; tick+=ticksize) {
         cairo_move_to(cr, 0, SCALE_YK(tick));
         cairo_line_to(cr, WIDTH, SCALE_YK(tick));
     }
@@ -540,7 +710,7 @@ gboolean redraw_all(GtkWidget *widget, cairo_t *cr, gpointer data_pointer) {
                 t4 = clock();
                 printf("Plotted polygon expression %p (%d) in %luus\n", expression_list+i, i+1, t4-t3);
 #endif
-            } else if (expr->func->oper == func_equals) {
+            } else if ((expr->func->oper == func_equals) || (expr->func->oper == func_greater)) {
                 if (!(expr->func->inter)) {
                     printf("ERROR: interval function needed for implicit plotting\n");
                     exit(EXIT_FAILURE);

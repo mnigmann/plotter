@@ -1297,9 +1297,45 @@ uint32_t func_length(void *f, double *stackpos) {
     return 1<<8;
 }
 
+uint32_t func_integrate(void *f, double *stackpos) {
+    function *fs = (function*)f;
+    function *var = fs->first_arg;
+    function *lb = var->next_arg;
+    function *ub = lb->next_arg;
+    function *expr = ub->next_arg;
+
+    //printf("Integrating %p, variable %p, interval function is %p\n", expr, var->value, expr->inter);
+    lb->oper(lb, stackpos);
+    double lbv = stackpos[0];
+    ub->oper(ub, stackpos);
+    double ubv = stackpos[0];
+    double dx = (ubv - lbv)/1024;
+    double xpos = 0;
+    double y, yp;
+    double result = 0;
+
+    double value = lbv;
+    ((variable*)(var->value))->pointer = &value;
+    ((variable*)(var->value))->type = 1<<8;
+    //printf("Range %f-%f, initial value %f, dx %f\n", lbv, ubv, value, dx);
+    expr->oper(expr, stackpos);
+    yp = stackpos[0];
+    //printf("Initial y-value %f\n", yp);
+    for (int i=0; i < 1024; i++) {
+        xpos += dx;
+        value = xpos + lbv;
+        expr->oper(expr, stackpos);
+        y = stackpos[0];
+        result += (yp + y)/2 * dx;
+        yp = y;
+    }
+    //printf("Integration result is %f\n", result);
+    stackpos[0] = result;
+    return 1<<8;
+}
 
 
-#define N_OPERATORS 37
+#define N_OPERATORS 38
 const oper_data oper_list[N_OPERATORS] = {
     {func_value, "func_value", interval_value},
 
@@ -1328,7 +1364,7 @@ const oper_data oper_list[N_OPERATORS] = {
 
     {func_for, "func_for", NULL},
     {func_equals, "func_equals", interval_equals},
-    {func_greater, "func_greater", NULL},
+    {func_greater, "func_greater", interval_greater},
 
     {func_extract_x, "func_extract_x", NULL},
     {func_extract_y, "func_extract_y", NULL},
@@ -1341,7 +1377,8 @@ const oper_data oper_list[N_OPERATORS] = {
     {func_conditional, "func_conditional", NULL},
     {func_sort, "func_sort", NULL},
     {func_join, "func_join", NULL},
-    {func_length, "func_length", NULL}
+    {func_length, "func_length", NULL},
+    {func_integrate, "func_integrate", NULL}
 };
 
 const oper_data *oper_lookup(uint32_t (*ptr)(void*, double*)) {

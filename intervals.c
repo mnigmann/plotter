@@ -461,6 +461,15 @@ uint32_t interval_equals(void *f, double *hstackpos, double *lstackpos) {
     return interval_general_two_args(f, hstackpos, lstackpos, miequals);
 }
 
+void migreater(double *hstackpos, double *lstackpos, double h, double l) {
+    hstackpos[0] -= l;
+    lstackpos[0] -= h;
+}
+
+uint32_t interval_greater(void *f, double *hstackpos, double *lstackpos) {
+    return interval_general_two_args(f, hstackpos, lstackpos, migreater);
+}
+
 void micos(double *hstackpos, double *lstackpos) {
     double h = hstackpos[0], l = lstackpos[0];
     if (h - l >= 2*M_PI) {
