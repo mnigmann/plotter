@@ -1297,6 +1297,40 @@ uint32_t func_length(void *f, double *stackpos) {
     return 1<<8;
 }
 
+double integrate_rec(function *func, double *stackpos, double *var, double lbv, double ubv, double *buf) {
+    double result = 0;
+    double xpos = INTEGRATE_DX;
+    if (lbv > ubv) return -integrate_rec(func, stackpos, var, ubv, lbv, buf);
+    *var = lbv;
+    func->oper(func, stackpos);
+    double yp = stackpos[0];
+    if (buf) {
+        buf[0] = *var;
+        buf[1] = yp;
+    }
+    uint32_t i=2;
+    while (*var < ubv) {
+        func->oper(func, stackpos);
+        result += INTEGRATE_DX*(stackpos[0] + yp)/2;
+        yp = stackpos[0];
+        if (buf) {
+            buf[i++] = *var;
+            buf[i++] = yp;
+        }
+        xpos += INTEGRATE_DX;
+        *var = lbv + xpos;
+    }
+    // final step
+    *var = ubv;
+    func->oper(func, stackpos);
+    if (buf) {
+        buf[i++] = *var;
+        buf[i++] = stackpos[0];
+    }
+    result += (ubv - (lbv + (xpos - INTEGRATE_DX)))*(stackpos[0] + yp)/2;
+    return result;
+}
+
 uint32_t func_integrate(void *f, double *stackpos) {
     function *fs = (function*)f;
     function *var = fs->first_arg;
@@ -1309,29 +1343,103 @@ uint32_t func_integrate(void *f, double *stackpos) {
     double lbv = stackpos[0];
     ub->oper(ub, stackpos);
     double ubv = stackpos[0];
-    double dx = (ubv - lbv)/1024;
+    if (lbv == ubv) {
+        // Null case is not cached
+        stackpos[0] = 0;
+        return 1<<8;
+    }
     double xpos = 0;
     double y, yp;
     double result = 0;
-
+    uint8_t negate = 0;
+    if (lbv > ubv) {
+        negate = 1;
+        double t = lbv;
+        lbv = ubv;
+        ubv = t;
+    }
     double value = lbv;
     ((variable*)(var->value))->pointer = &value;
     ((variable*)(var->value))->type = 1<<8;
-    //printf("Range %f-%f, initial value %f, dx %f\n", lbv, ubv, value, dx);
-    expr->oper(expr, stackpos);
-    yp = stackpos[0];
-    //printf("Initial y-value %f\n", yp);
-    for (int i=0; i < 1024; i++) {
-        xpos += dx;
-        value = xpos + lbv;
+    if (ubv - lbv <= INTEGRATE_DX) {
         expr->oper(expr, stackpos);
-        y = stackpos[0];
-        result += (yp + y)/2 * dx;
-        yp = y;
+        value = ubv;
+        expr->oper(expr, stackpos+1);
+        stackpos[0] = (ubv - lbv)*(stackpos[0] + stackpos[1])/2;
+        if (negate) stackpos[0] *= -1;
+        return 1<<8;
     }
-    //printf("Integration result is %f\n", result);
-    stackpos[0] = result;
-    return 1<<8;
+    if (fs->value) {
+        uint32_t size = fs->value_type>>8;
+        double *value_buf = fs->value;
+        //printf("Cache found, previous range from %f to %f, current from %f to %f\n", value_buf[0], value_buf[size-2], lbv, ubv);
+        if ((lbv >= value_buf[0]) && (ubv <= value_buf[size-2])) {
+            uint32_t start, end;
+            for (uint32_t i=0; i < size; i+=2) {
+                if (value_buf[i] > lbv) {
+                    start = i;
+                    break;
+                }
+            }
+            for (uint32_t i=size-2; i > 0; i-=2) {
+                if (value_buf[i] < ubv) {
+                    end = i;
+                    break;
+                }
+            }
+            for (uint32_t i=start; i < end; i+=2) {
+                result += INTEGRATE_DX*(value_buf[i+1] + value_buf[i+3])/2;
+            }
+            //printf("previous sum %f\n", result);
+            value = lbv;
+            expr->oper(expr, stackpos);
+            result += (value_buf[start] - lbv)*(value_buf[start+1] + stackpos[0])/2;
+            value = ubv;
+            expr->oper(expr, stackpos);
+            result += (ubv - value_buf[end])*(value_buf[end+1] + stackpos[0])/2;
+            stackpos[0] = result;
+            if (negate) stackpos[0] *= -1;
+            //printf("    slicing old from %d to %d, %f to %f, result %f\n", start, end, value_buf[start], value_buf[end], stackpos[0]);
+            return 1<<8;
+        }
+    } //else {
+        //printf("Computing integral from %f to %f with step %f\n", lbv, ubv, dx);
+        uint32_t n_steps = (ubv - lbv)/INTEGRATE_DX + 4;
+        value = lbv;
+        if (fs->value) free(fs->value);
+        fs->value = malloc(n_steps*2*sizeof(double));
+        double *value_buf = fs->value;
+        xpos = INTEGRATE_DX;
+        result = 0;
+        // Initial value
+        expr->oper(expr, stackpos);
+        yp = stackpos[0];
+        value_buf[0] = lbv;
+        value_buf[1] = yp;
+        // Main iteration
+        uint32_t i=2;
+        while (value < ubv) {
+            value = lbv + xpos;
+            expr->oper(expr, stackpos);
+            result += INTEGRATE_DX*(stackpos[0] + yp)/2;
+            yp = stackpos[0];
+            value_buf[i++] = value;
+            value_buf[i++] = yp;
+            xpos += INTEGRATE_DX;
+        }
+        // Final value
+        value = ubv;
+        expr->oper(expr, stackpos);
+        value_buf[i++] = value;
+        value_buf[i++] = stackpos[0];
+        fs->value_type = i<<8;
+        result += (ubv - (lbv + (xpos - INTEGRATE_DX)))*(stackpos[0] + yp)/2;
+        stackpos[0] = result;
+        if (negate) stackpos[0] *= -1;
+        //printf("Total stored length %d, predicted %d, negate %d, result %f\n", i, n_steps, negate, stackpos[0]);
+        //printf("Storing %f, %f to %p, bounds %f to %f\n", value_buf[0], value_buf[1024], value_buf, lbv, ubv);
+        return 1<<8;
+    //}
 }
 
 

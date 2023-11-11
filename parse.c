@@ -831,6 +831,8 @@ int parse_latex_rec(char *latex, int end, function *function_list, double *stack
                 function_list[prev].next_arg = function_list + func_pos;
                 // Create a new variable for the summation index
                 strncpy(stringbuf + *string_size, latex+arg1_start+1, end-arg1_start-1);
+                stringbuf[*string_size + end-arg1_start-1] = 0;
+                printf("Creating integration variable %s from %.*s\n", stringbuf+ *string_size, end-arg1_start-1, latex+arg1_start+1);
                 variable_list[*var_size] = new_variable(stringbuf + *string_size, 0, VARIABLE_IN_SCOPE, NULL);
                 *string_size += arg1_end-1;
                 *var_size += 1;

@@ -17,6 +17,7 @@
 #define MIN_DT 1e-3
 #define IMPLICIT_MAXDEPTH 8
 #define USE_INEQUALITY
+#define INTEGRATE_DX 1e-2
 
 #define PI 3.14159265359
 #define SCROLL_AMOUNT 1.1
