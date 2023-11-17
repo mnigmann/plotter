@@ -26,7 +26,9 @@ void insert_rec(GtkTreeStore *store, function *func, GtkTreeIter *parent, char *
     uint32_t v2;
     if (oper) v2 = v1+sprintf(stringbuf+v1, "%s", oper->name)+1;
     else v2 = v1+sprintf(stringbuf+v1, "%p", func->oper)+1;
-    uint32_t v3 = v2+sprintf(stringbuf+v2, "%p", func->value)+1;
+    uint32_t v3;
+    if ((func->oper == func_value) && !(func->value_type & 0x40)) v3 = v2+sprintf(stringbuf+v2, "%p (%e)", func->value, ((double*)(func->value))[0])+1;
+    else v3 = v2+sprintf(stringbuf+v2, "%p", func->value)+1;
     uint32_t v4 = v3+sprintf(stringbuf+v3, "%08x", func->value_type)+1;
     stringbuf[v4] = 0;
     if (func->value_type & 0x40) sprintf(stringbuf+v4, "%s", ((variable*)(func->value))->name);

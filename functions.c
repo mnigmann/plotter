@@ -29,18 +29,10 @@ uint32_t func_general_one_arg(void *f, double *stackpos, double (*oper)(double))
     function *fs = (function*)f;
     function *arg = fs->first_arg;
     uint32_t len, type;
-    if (arg->oper) {
-        type = arg->oper(arg, stackpos);
-        len = type>>8;
-        for (int i=0; i < len; i++) stackpos[i] = oper(stackpos[i])*SIGN_BIT(fs);
-        return (len<<8) | (type & TYPE_LIST);
-    } else {
-        len = ((arg->value_type)&0x40 ? ((variable*)(arg->value))->type : arg->value_type)>>8;
-        if (len) {
-            for (int i=0; i < len; i++) stackpos[i] = oper(VALUE_LIST(arg, i)) * SIGN_BIT(fs);
-        } else stackpos[0] = oper(VALUE(arg)) * SIGN_BIT(fs);
-        return arg->value_type;
-    }
+    type = arg->oper(arg, stackpos);
+    len = type>>8;
+    for (int i=0; i < len; i++) stackpos[i] = oper(stackpos[i])*SIGN_BIT(fs);
+    return (len<<8) | (type & TYPE_LIST);
 }
 
 uint32_t func_general_two_args(void *f, double *stackpos, double (*oper)(double, double)) {
@@ -250,6 +242,16 @@ uint32_t func_abs(void *f, double *stackpos) {
 }
 
 uint32_t func_log(void *f, double *stackpos) {
+    function *fs = (function*)f;
+    function *arg = fs->first_arg;
+    // logarithms of factorials must be computed separately for better performance
+    if (arg->oper == func_factorial) {
+        uint32_t type, len;
+        type = arg->first_arg->oper(arg->first_arg, stackpos);
+        len = type>>8;
+        for (int i=0; i < len; i++) stackpos[i] = SIGN_BIT(fs)*mlogfac(stackpos[i]);
+        return type;
+    }
     return func_general_one_arg(f, stackpos, log);
 }
 
@@ -945,7 +947,12 @@ uint32_t func_sum(void *f, double *stackpos) {
     double end_val = *val2;
     double *pos;
     uint32_t type, len;
+    //printf("summing from %e to %e\n", start_val, end_val);
     if (!(t_start & TYPE_LIST) && !(t_end & TYPE_LIST)) {
+        if (start_val > end_val) {
+            stackpos[0] = 0;
+            return 1<<8;
+        }
         varptr->pointer = &value;
         varptr->type = 0x100;
         for (value=start_val; value <= end_val; value++) {
@@ -965,6 +972,7 @@ uint32_t func_sum(void *f, double *stackpos) {
             }
         }
         for (i=0; i < result_length; i++) stackpos[i] = stackpos[st+i]*SIGN_BIT(fs);
+        //printf("sum is %e\n", stackpos[0]);
     }
     return (result_length<<8) | result_type;
 }
@@ -990,9 +998,27 @@ uint32_t func_prod(void *f, double *stackpos) {
     int i;
     double start_val = *val1;
     double end_val = *val2;
+    //printf("multiplying from %e to %e\n", start_val, end_val);
     if (!(t_start & TYPE_LIST) && !(t_end & TYPE_LIST)) {
         varptr->pointer = &value;
         varptr->type = 0x100;
+        if (start_val > end_val) {
+            stackpos[0] = SIGN_BIT(fs);
+            return 1<<8;
+        }
+        if (fs->value_type == (1<<8)) {
+            // Special case of a scalar product of real numbers
+            value = start_val;
+            expr->oper(expr, stackpos+st);
+            prod = stackpos[st];
+            value++;
+            for (; value <= end_val; value++) {
+                expr->oper(expr, stackpos+st);
+                prod *= stackpos[st];
+            }
+            stackpos[0] = prod*SIGN_BIT(fs);
+            return 1<<8;
+        }
         for (value=start_val; value <= end_val; value++) {
             if (value == start_val) {
                 result_type = expr->oper(expr, stackpos+st);
@@ -1004,6 +1030,9 @@ uint32_t func_prod(void *f, double *stackpos) {
         }
     }
     for (int j=0; j < result_length; j++) stackpos[j] = stackpos[st+j]*SIGN_BIT(fs);
+    //printf("product is %e\n", stackpos[0]);
+    fs->value_type = (result_length<<8) | result_type;
+    printf("storing value_type %08x\n", fs->value_type);
     return (result_length<<8) | result_type;
 }
 

@@ -148,14 +148,14 @@ void draw_function_slow(function *func, double *stackpos, uint8_t *color, cairo_
         printf("Parametric function detected\n");
         eval_func(0, &xp, &yp, func, stackpos);
         cairo_move_to(cr, SCALE_XK(xp), SCALE_YK(yp));
-        eval_func(DT_DERIV, &x, &y, func, stackpos);
-        dt = MAX_ARC_LENGTH*DT_DERIV/hypot((x-xp)*xscale, (y-yp)*yscale);
+        eval_func(PLOT_DT_DERIV, &x, &y, func, stackpos);
+        dt = PLOT_MAX_ARC_LENGTH*PLOT_DT_DERIV/hypot((x-xp)*xscale, (y-yp)*yscale);
         printf("Initial point (%f, %f), dt is %f\n", xp, yp, dt);
         t += dt;
         while (t < 1) {
             eval_func(t, &x, &y, func, stackpos);
             cairo_line_to(cr, SCALE_XK(x), SCALE_YK(y));
-            dt = MAX_ARC_LENGTH*dt/hypot((x-xp)*xscale, (y-yp)*yscale);
+            dt = PLOT_MAX_ARC_LENGTH*dt/hypot((x-xp)*xscale, (y-yp)*yscale);
             t += dt;
             xp = x; yp = y;
         }
@@ -174,8 +174,61 @@ void draw_function_slow(function *func, double *stackpos, uint8_t *color, cairo_
     cairo_stroke(cr);
 }
 
+void find_extremum(function *func, double *stackpos, double x, double y, double xp, double yp, double xpp, double ypp) {
+    double u1, v1, u2, v2, ex, temp, val, m1, m2;
+    // We assume that x > xp > xpp
+    for (int i=0; i < 10; i++) {
+        u1 = x - xp; v1 = y - yp;
+        u2 = xpp - xp; v2 = ypp - yp;
+        temp = fabs(yp) * PLOT_EXTREMUM_EPS;
+        if ((fabs(v1) < temp) && (fabs(v2) < temp)) break;
+        ex = (u2*u2*v1 - u1*u1*v2)/(2*(u2*v1 - u1*v2));
+        if (ex > 0) {
+            xpp = xp;
+            ypp = yp;
+            xp += ex;
+            eval_func(xp, &temp, &yp, func, stackpos);
+        } else if (ex < 0) {
+            x = xp;
+            y = yp;
+            xp += ex;
+            eval_func(xp, &temp, &yp, func, stackpos);
+        } else {
+            x = (x + xp)/2;
+            eval_func(x, &temp, &y, func, stackpos);
+            xpp = (xpp + xp)/2;
+            eval_func(xpp, &temp, &ypp, func, stackpos);
+        }
+        printf("    iterated extremum at %f, value %f\n", xp, yp);
+    }
+}
+
+void find_discontinuity(function *func, double *stackpos, double t, double x, double y, double tp, double xp, double yp, cairo_t *cr) {
+    // Assume that the function is monotonic on the interval [t, tp]
+    // If we subdivide the interval
+    double tc, xc, yc, d, dp;
+    for (int i=0; i < PLOT_DISCONTINUITY_MAXITER; i++) {
+        tc = (t + tp)/2;
+        eval_func(tc, &xc, &yc, func, stackpos);
+        d = hypot((xc-x)*xscale, (yc-y)*yscale);
+        dp = hypot((xc-xp)*xscale, (yc-yp)*yscale);
+        if (d > dp) {
+            // tc is close to tp so the discontinuity is probably in
+            // the range [t, tc]
+            tp = tc; xp = xc; yp = yc;
+        } else {
+            // tc is close to t so the discontinuity is probably in
+            // the range [tc, tp]
+            t = tc; x = xc; y = yc;
+        }
+        printf("    iterated discontinuity %f -> (%f, %f) and %f -> (%f, %f)\n", tp, xp, yp, t, x, y);
+    }
+    cairo_line_to(cr, SCALE_XK(xp), SCALE_YK(yp));
+    cairo_move_to(cr, SCALE_XK(x), SCALE_YK(y));
+}
+
 void draw_function_constant_ds_rec(function *func, file_data *fd, cairo_t *cr, uint8_t flags, double t_start, double t_end, double xi, double yi, double min_dt) {
-    double x, y, xp, yp, dt;
+    double x, y, xp, yp, xpp, ypp, tp, tpp, dt, ds, dsp;
     //printf("t_end %f, t_start %f, min_dt %f\n", t_end, t_start, min_dt);
     if (t_end - t_start < min_dt) {
         //printf("Returning due to minimum dt\n");
@@ -188,16 +241,35 @@ void draw_function_constant_ds_rec(function *func, file_data *fd, cairo_t *cr, u
         // If the lower point is in-bounds, start from there and go up
         eval_func(t_start, &xp, &yp, func, stackpos);
         cairo_move_to(cr, SCALE_XK(xp), SCALE_YK(yp));
-        eval_func(t_start+DT_DERIV, &x, &y, func, stackpos);
-        dt = MAX_ARC_LENGTH*DT_DERIV/hypot((x-xp)*xscale, (y-yp)*yscale);
-        //printf("Initial point (%f, %f), dt is %f\n", xp, yp, dt);
+        eval_func(t_start+PLOT_DT_DERIV, &x, &y, func, stackpos);
+        ds = hypot((x-xp)*xscale, (y-yp)*yscale);
+        if (ds > PLOT_MAX_ARC_LENGTH*PLOT_DISCONTINUITY_THRESHOLD) {
+            printf("Possible discontinuity between %f and %f: (%f, %f) and (%f, %f)\n", t_start, tp, x, y, xp, yp);
+            find_discontinuity(func, stackpos, t_start, x, y, tp, xp, yp, cr);
+        }
+        dt = PLOT_MAX_ARC_LENGTH*PLOT_DT_DERIV/ds;
+        //printf("Initial point (%f, %f), dt is %e, dx is %e\n", xp, yp, dt, (x-xp));
+        tp = t_start;
         t_start += dt;
+        uint32_t step = 0;
         while (t_start < t_end) {
             eval_func(t_start, &x, &y, func, stackpos);
+            ds = hypot((x-xp)*xscale, (y-yp)*yscale);
+            dt = PLOT_MAX_ARC_LENGTH*dt/ds;
+            /*if ((yp > ypp) && (yp > y) && (step >= 2)) {
+                printf("Possible maximum at %f -> (%f, %f)\n", tp, xp, yp);
+                find_extremum(func, stackpos, t_start, y, tp, xp, tpp, ypp);
+            } else if ((yp < ypp) && (yp < y) && (step >= 2)) {
+                printf("Possible minimum at %f -> (%f, %f)\n", tp, xp, yp);
+            }*/
+            if (ds > PLOT_MAX_ARC_LENGTH*PLOT_DISCONTINUITY_THRESHOLD) {
+                printf("Possible discontinuity between %f and %f: (%f, %f) and (%f, %f)\n", t_start, tp, x, y, xp, yp);
+                find_discontinuity(func, stackpos, t_start, x, y, tp, xp, yp, cr);
+            }
             cairo_line_to(cr, SCALE_XK(x), SCALE_YK(y));
-            dt = MAX_ARC_LENGTH*dt/hypot((x-xp)*xscale, (y-yp)*yscale);
+            step++;
+            xpp = xp; ypp = yp; xp = x; yp = y; tpp = tp; tp = t_start; dsp = ds;
             t_start += dt;
-            xp = x; yp = y;
             if (!IN_BOUNDS(x, y)) {
                 // Leaving the bounds, so iterate on [t, t_end]
                 cairo_stroke(cr);
@@ -210,16 +282,26 @@ void draw_function_constant_ds_rec(function *func, file_data *fd, cairo_t *cr, u
         // If the upper point is in-bounds, start from there and go down
         eval_func(t_end, &xp, &yp, func, stackpos);
         cairo_move_to(cr, SCALE_XK(xp), SCALE_YK(yp));
-        eval_func(t_end-DT_DERIV, &x, &y, func, stackpos);
-        dt = MAX_ARC_LENGTH*DT_DERIV/hypot((x-xp)*xscale, (y-yp)*yscale);
+        eval_func(t_end-PLOT_DT_DERIV, &x, &y, func, stackpos);
+        ds = hypot((x-xp)*xscale, (y-yp)*yscale);
+        dt = PLOT_MAX_ARC_LENGTH*PLOT_DT_DERIV/ds;
+        if (ds > PLOT_MAX_ARC_LENGTH*PLOT_DISCONTINUITY_THRESHOLD) {
+            printf("Possible discontinuity between %f and %f: (%f, %f) and (%f, %f)\n", t_start, tp, x, y, xp, yp);
+            find_discontinuity(func, stackpos, t_start, x, y, tp, xp, yp, cr);
+        }
         //printf("Initial point (%f, %f), dt is %f\n", xp, yp, dt);
         t_end -= dt;
         while (t_end > t_start) {
             eval_func(t_end, &x, &y, func, stackpos);
+            ds = hypot((x-xp)*xscale, (y-yp)*yscale);
+            dt = PLOT_MAX_ARC_LENGTH*dt/ds;
+            if (ds > PLOT_MAX_ARC_LENGTH*PLOT_DISCONTINUITY_THRESHOLD) {
+                printf("Possible discontinuity between %f and %f: (%f, %f) and (%f, %f)\n", t_end, tp, x, y, xp, yp);
+                find_discontinuity(func, stackpos, t_end, x, y, tp, xp, yp, cr);
+            }
             cairo_line_to(cr, SCALE_XK(x), SCALE_YK(y));
-            dt = MAX_ARC_LENGTH*dt/hypot((x-xp)*xscale, (y-yp)*yscale);
+            xp = x; yp = y; tp = t_end; dsp = ds;
             t_end -= dt;
-            xp = x; yp = y;
             if (!IN_BOUNDS(x, y)) {
                 // Leaving the bounds, so iterate on [t, t_end]
                 cairo_stroke(cr);
@@ -236,7 +318,7 @@ void draw_function_constant_ds_rec(function *func, file_data *fd, cairo_t *cr, u
         // If neither point is in-bounds, subdivide and iterate
         double t_avg = (t_end + t_start)/2;
         eval_func(t_avg, &x, &y, func, stackpos);
-        if (hypot((x - xi)*xscale, (y - yi)*yscale) < MAX_ARC_LENGTH) return;
+        if (hypot((x - xi)*xscale, (y - yi)*yscale) < PLOT_MAX_ARC_LENGTH) return;
         //printf("Neither point in bounds on interval %f, %f -> (%f, %f), (%f, %f), %d\n", t_start, t_end, x, y, xi, yi, IN_BOUNDS(x, y));
         if (IN_BOUNDS(x, y)) {
             // [t_start, t_avg]
@@ -251,7 +333,7 @@ void draw_function_constant_ds_rec(function *func, file_data *fd, cairo_t *cr, u
         // If neither point is in-bounds, subdivide and iterate
         double t_avg = (t_end + t_start)/2;
         eval_func(t_avg, &x, &y, func, stackpos);
-        if (hypot((x - xi)*xscale, (y - yi)*yscale) < MAX_ARC_LENGTH) return;
+        if (hypot((x - xi)*xscale, (y - yi)*yscale) < PLOT_MAX_ARC_LENGTH) return;
         //printf("Neither point in bounds on interval %f, %f -> (%f, %f), (%f, %f), %d\n", t_start, t_end, x, y, xi, yi, IN_BOUNDS(x, y));
         if (IN_BOUNDS(x, y)) {
             // [t_start, t_avg]
@@ -271,11 +353,11 @@ void draw_function_constant_ds(function *func, file_data *fd, uint8_t *color, ca
     double *stackpos = fd->stack + fd->n_stack;
     t = 0;
     t_end = 1;
-    double min_dt = MIN_DT;
+    double min_dt = PLOT_MIN_DT;
     if ((eval_func(0, &xp, &yp, func, stackpos) & TYPE_MASK) != TYPE_POINT) {
         t = window_x0;
         t_end = window_x1;
-        min_dt = MAX_ARC_LENGTH/xscale;
+        min_dt = PLOT_MAX_ARC_LENGTH/xscale;
     }
     nfev = 0;
     niev = 0;
@@ -298,7 +380,7 @@ void draw_implicit_rec(function *func, file_data *fd, cairo_t *cr, uint8_t *colo
     niev++;
     if (lstackpos[0] > 0) {
         // Everything in the interval is greater than zero
-#ifdef USE_INEQUALITY
+#ifdef PLOT_USE_INEQUALITY
         if (func->oper == func_greater) {
             SET_COLOR_OPACITY(cr, color, 0.5);
             cairo_rectangle(cr, SCALE_XK(area[0]), SCALE_YK(area[3]), xscale*(area[1] - area[0]), yscale*(area[3] - area[2]));
@@ -315,7 +397,7 @@ void draw_implicit_rec(function *func, file_data *fd, cairo_t *cr, uint8_t *colo
         //cairo_stroke(cr);
         return;
     }
-    if (divisions == IMPLICIT_MAXDEPTH) {
+    if (divisions == PLOT_IMPLICIT_MAXDEPTH) {
         // Maximum depth reached
         //printf("    maximum depth reached on ([%f, %f], [%f, %f]) --> [%f, %f]\n", area[0], area[1], area[2], area[3], lstackpos[0], stackpos[0]);
         //cairo_rectangle(cr, SCALE_XK(area[0]), SCALE_YK(area[3]), xscale*(area[1] - area[0]), yscale*(area[3] - area[2]));
@@ -351,7 +433,7 @@ void draw_implicit_rec(function *func, file_data *fd, cairo_t *cr, uint8_t *colo
 
         if ((e00 > 0) && (e10 > 0) && (e11 > 0) && (e01 > 0)) {
             // Interval calculation was wrong
-#ifdef USE_INEQUALITY
+#ifdef PLOT_USE_INEQUALITY
             if (func->oper == func_greater) {
                 SET_COLOR_OPACITY(cr, color, 0.5);
                 cairo_rectangle(cr, SCALE_XK(area[0]), SCALE_YK(area[3]), xscale*(area[1] - area[0]), yscale*(area[3] - area[2]));
@@ -398,7 +480,7 @@ void draw_implicit_rec(function *func, file_data *fd, cairo_t *cr, uint8_t *colo
                 // different values from their neighbors. No more than two corners can
                 // be zero and they must be on opposite corners. If we sample two adjacent
                 // corners, at least one will not be zero
-#ifdef USE_INEQUALITY
+#ifdef PLOT_USE_INEQUALITY
                 if (func->oper == func_greater) {
                     SET_COLOR_OPACITY(cr, color, 0.5);
                     if ((e00 > 0) || (e10 < 0)) {
@@ -433,7 +515,7 @@ void draw_implicit_rec(function *func, file_data *fd, cairo_t *cr, uint8_t *colo
             case 0x5:
                 cairo_move_to(cr, sspos, sy0);
                 cairo_line_to(cr, snpos, sy1);
-#ifdef USE_INEQUALITY
+#ifdef PLOT_USE_INEQUALITY
                 if (func->oper == func_greater) {
                     cairo_stroke_preserve(cr);
                     SET_COLOR_OPACITY(cr, color, 0.5);
@@ -456,7 +538,7 @@ void draw_implicit_rec(function *func, file_data *fd, cairo_t *cr, uint8_t *colo
             case 0xa:
                 cairo_move_to(cr, sx0, swpos);
                 cairo_line_to(cr, sx1, sepos);
-#ifdef USE_INEQUALITY
+#ifdef PLOT_USE_INEQUALITY
                 if (func->oper == func_greater) {
                     cairo_stroke_preserve(cr);
                     SET_COLOR_OPACITY(cr, color, 0.5);
@@ -477,7 +559,7 @@ void draw_implicit_rec(function *func, file_data *fd, cairo_t *cr, uint8_t *colo
             case 0x3:
                 cairo_move_to(cr, sx1, sepos);
                 cairo_line_to(cr, snpos, sy1);
-#ifdef USE_INEQUALITY
+#ifdef PLOT_USE_INEQUALITY
                 if (func->oper == func_greater) {
                     cairo_stroke_preserve(cr);
                     SET_COLOR_OPACITY(cr, color, 0.5);
@@ -498,7 +580,7 @@ void draw_implicit_rec(function *func, file_data *fd, cairo_t *cr, uint8_t *colo
             case 0x6:
                 cairo_move_to(cr, sx1, sepos);
                 cairo_line_to(cr, sspos, sy0);
-#ifdef USE_INEQUALITY
+#ifdef PLOT_USE_INEQUALITY
                 if (func->oper == func_greater) {
                     cairo_stroke_preserve(cr);
                     SET_COLOR_OPACITY(cr, color, 0.5);
@@ -519,7 +601,7 @@ void draw_implicit_rec(function *func, file_data *fd, cairo_t *cr, uint8_t *colo
             case 0xc:
                 cairo_move_to(cr, sx0, swpos);
                 cairo_line_to(cr, sspos, sy0);
-#ifdef USE_INEQUALITY
+#ifdef PLOT_USE_INEQUALITY
                 if (func->oper == func_greater) {
                     cairo_stroke_preserve(cr);
                     SET_COLOR_OPACITY(cr, color, 0.5);
@@ -540,7 +622,7 @@ void draw_implicit_rec(function *func, file_data *fd, cairo_t *cr, uint8_t *colo
             case 0x9:
                 cairo_move_to(cr, sx0, swpos);
                 cairo_line_to(cr, snpos, sy1);
-#ifdef USE_INEQUALITY
+#ifdef PLOT_USE_INEQUALITY
                 if (func->oper == func_greater) {
                     cairo_stroke_preserve(cr);
                     SET_COLOR_OPACITY(cr, color, 0.5);
@@ -880,8 +962,8 @@ int main (int argc, char **argv) {
     memset(variable_list, 0, 10*sizeof(variable));
     memset(expression_list, 0, 10*sizeof(expression));
     printf("First stack positions %p, %p\n", stack, stack+1);
-    variable_list[0] = new_variable("x", 0, VARIABLE_IN_SCOPE, NULL);
-    variable_list[1] = new_variable("y", 0, VARIABLE_IN_SCOPE, NULL);
+    variable_list[0] = new_variable("x", 0, VARIABLE_IN_SCOPE | VARIABLE_INTERVAL, NULL);
+    variable_list[1] = new_variable("y", 0, VARIABLE_IN_SCOPE | VARIABLE_INTERVAL, NULL);
     double pi = M_PI;
     variable_list[2] = new_variable("\\pi", 1<<8, VARIABLE_IN_SCOPE, &pi);
 

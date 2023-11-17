@@ -11,19 +11,24 @@
 #define MAX_POLYGON_SIZE 4
 
 // in scale units
-#define DT_DERIV 1e-4
+#define PLOT_DT_DERIV 1e-7
 // in pixels
-#define MAX_ARC_LENGTH 3
-#define MIN_DT 1e-3
-#define IMPLICIT_MAXDEPTH 8
-#define USE_INEQUALITY
+#define PLOT_MAX_ARC_LENGTH 3
+#define PLOT_MIN_DT 1e-3
+#define PLOT_IMPLICIT_MAXDEPTH 8
+#define PLOT_USE_INEQUALITY
+#define PLOT_EXTREMUM_MAXITER 10
+#define PLOT_EXTREMUM_EPS 1e-8
+#define PLOT_DISCONTINUITY_THRESHOLD 4
+#define PLOT_CONTINUITY_THRESHOLD 0.8
+#define PLOT_DISCONTINUITY_MAXITER 10
 #define INTEGRATE_DX 1e-2
 
 #define PI 3.14159265359
 #define SCROLL_AMOUNT 1.1
 #define TICK_SIZE 125
 
-//#define DEBUG_EVAL
+#define DEBUG_EVAL
 #define DEBUG_PLOT
 
 #endif

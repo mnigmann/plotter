@@ -97,15 +97,18 @@ uint32_t interval_value(void *f, double *hstackpos, double *lstackpos) {
         if (!ptr) FAIL("ERROR: function block %p references variable %p (%s) with null pointer\n", fs, fs->value, var->name);
         // If the variable is an action, run its source code
         if (var->flags & VARIABLE_ACTION) FAIL("ERROR: interval calculation not supported for actions\n");
+        double *hpos;
         uint32_t len = type>>8;
+        if (var->flags & VARIABLE_INTERVAL) hpos = ptr+len;
+        else hpos = ptr;
         if (fs->value_type & 0x80) {
             for (int i=0; i < len; i++) {
                 hstackpos[i] = -ptr[i];
-                lstackpos[i] = -ptr[i+len];
+                lstackpos[i] = -hpos[i];
             }
         } else {
             for (int i=0; i < len; i++) {
-                hstackpos[i] = ptr[i+len];
+                hstackpos[i] = hpos[i];
                 lstackpos[i] = ptr[i];
             }
         }
