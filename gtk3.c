@@ -207,7 +207,13 @@ void find_discontinuity(function *func, double *stackpos, double t, double x, do
     // Assume that the function is monotonic on the interval [t, tp]
     // If we subdivide the interval
     double tc, xc, yc, d, dp;
+    double origdist = PLOT_CONTINUITY_THRESHOLD*hypot((x-xp)*xscale, (y-yp)*yscale);
     for (int i=0; i < PLOT_DISCONTINUITY_MAXITER; i++) {
+        if (hypot((x-xp)*xscale, (y-yp)*yscale) <= origdist) {
+            cairo_line_to(cr, SCALE_XK(xp), SCALE_YK(yp));
+            cairo_line_to(cr, SCALE_XK(x), SCALE_YK(y));
+            return;
+        }
         tc = (t + tp)/2;
         eval_func(tc, &xc, &yc, func, stackpos);
         d = hypot((xc-x)*xscale, (yc-y)*yscale);
@@ -221,7 +227,7 @@ void find_discontinuity(function *func, double *stackpos, double t, double x, do
             // the range [tc, tp]
             t = tc; x = xc; y = yc;
         }
-        printf("    iterated discontinuity %f -> (%f, %f) and %f -> (%f, %f)\n", tp, xp, yp, t, x, y);
+        //printf("    iterated discontinuity %f -> (%f, %f) and %f -> (%f, %f)\n", tp, xp, yp, t, x, y);
     }
     cairo_line_to(cr, SCALE_XK(xp), SCALE_YK(yp));
     cairo_move_to(cr, SCALE_XK(x), SCALE_YK(y));
@@ -244,7 +250,7 @@ void draw_function_constant_ds_rec(function *func, file_data *fd, cairo_t *cr, u
         eval_func(t_start+PLOT_DT_DERIV, &x, &y, func, stackpos);
         ds = hypot((x-xp)*xscale, (y-yp)*yscale);
         if (ds > PLOT_MAX_ARC_LENGTH*PLOT_DISCONTINUITY_THRESHOLD) {
-            printf("Possible discontinuity between %f and %f: (%f, %f) and (%f, %f)\n", t_start, tp, x, y, xp, yp);
+            //printf("Possible discontinuity between %f and %f: (%f, %f) and (%f, %f)\n", t_start, tp, x, y, xp, yp);
             find_discontinuity(func, stackpos, t_start, x, y, tp, xp, yp, cr);
         }
         dt = PLOT_MAX_ARC_LENGTH*PLOT_DT_DERIV/ds;
@@ -263,7 +269,7 @@ void draw_function_constant_ds_rec(function *func, file_data *fd, cairo_t *cr, u
                 printf("Possible minimum at %f -> (%f, %f)\n", tp, xp, yp);
             }*/
             if (ds > PLOT_MAX_ARC_LENGTH*PLOT_DISCONTINUITY_THRESHOLD) {
-                printf("Possible discontinuity between %f and %f: (%f, %f) and (%f, %f)\n", t_start, tp, x, y, xp, yp);
+                //printf("Possible discontinuity between %f and %f: (%f, %f) and (%f, %f)\n", t_start, tp, x, y, xp, yp);
                 find_discontinuity(func, stackpos, t_start, x, y, tp, xp, yp, cr);
             }
             cairo_line_to(cr, SCALE_XK(x), SCALE_YK(y));
@@ -286,7 +292,7 @@ void draw_function_constant_ds_rec(function *func, file_data *fd, cairo_t *cr, u
         ds = hypot((x-xp)*xscale, (y-yp)*yscale);
         dt = PLOT_MAX_ARC_LENGTH*PLOT_DT_DERIV/ds;
         if (ds > PLOT_MAX_ARC_LENGTH*PLOT_DISCONTINUITY_THRESHOLD) {
-            printf("Possible discontinuity between %f and %f: (%f, %f) and (%f, %f)\n", t_start, tp, x, y, xp, yp);
+            //printf("Possible discontinuity between %f and %f: (%f, %f) and (%f, %f)\n", t_start, tp, x, y, xp, yp);
             find_discontinuity(func, stackpos, t_start, x, y, tp, xp, yp, cr);
         }
         //printf("Initial point (%f, %f), dt is %f\n", xp, yp, dt);
@@ -296,7 +302,7 @@ void draw_function_constant_ds_rec(function *func, file_data *fd, cairo_t *cr, u
             ds = hypot((x-xp)*xscale, (y-yp)*yscale);
             dt = PLOT_MAX_ARC_LENGTH*dt/ds;
             if (ds > PLOT_MAX_ARC_LENGTH*PLOT_DISCONTINUITY_THRESHOLD) {
-                printf("Possible discontinuity between %f and %f: (%f, %f) and (%f, %f)\n", t_end, tp, x, y, xp, yp);
+                //printf("Possible discontinuity between %f and %f: (%f, %f) and (%f, %f)\n", t_end, tp, x, y, xp, yp);
                 find_discontinuity(func, stackpos, t_end, x, y, tp, xp, yp, cr);
             }
             cairo_line_to(cr, SCALE_XK(x), SCALE_YK(y));
@@ -898,6 +904,7 @@ static gboolean timeout_callback(gpointer data_pointer) {
 }
 
 static gboolean keypress_callback(GtkWidget *widget, GdkEventKey *event, gpointer data_pointer) {
+    file_data *fd = (file_data*)data_pointer;
     printf("Event is %d\n", event->keyval);
     if (event->keyval == 's') {
         run_ticker = 1;
@@ -905,7 +912,7 @@ static gboolean keypress_callback(GtkWidget *widget, GdkEventKey *event, gpointe
     } else if (event->keyval == 'e') {
         run_ticker = 0;
     } else if (event->keyval == 'i') {
-        treeview_activate(&fd);
+        treeview_activate(fd);
         printf("inspecting\n");
     }
     return TRUE;

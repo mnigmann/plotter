@@ -12,4 +12,10 @@ a\to a+1
 \prod_{n=1}^{6}\left(n^{2},n^{3}\right)
 \left(4,3\right)\left(7,2\right)
 \left(\frac{\cos\left(\exp\left(3x\right)\right)}{\exp\left(3x\right)},\frac{\sin\left(\exp\left(3x\right)\right)}{\exp\left(3x\right)}\right)
-x\cos\left(y\right)+y\cos\left(x\right)=0
+\int_{0.02}^{0.04}\sin\left(\sin\left(\frac{1}{x}\right)\right)dx
+x\cos\left(y\right)+y\cos\left(x\right)>0
+#\int_{0}^{x}\sin\left(\sin\left(t\right)\right)dt
+\int_{1}^{x}\arctan\left(t\right)dt
+#p=\left(x,y\right)
+#p.x^{2}+p.y^{2}=25
+\sum_{i=1}^{x}\frac{1}{i}
