@@ -40,6 +40,7 @@ uint16_t niev = 0;
 function function_list[2048];
 variable variable_list[128];
 expression expression_list[100];
+expression *deptable[300];
 double stack[65536];
 double lstack[65536];
 char stringbuf[500];
@@ -87,6 +88,75 @@ uint32_t eval_inter(double *xi, function *func, double *hstackpos, double *lstac
     }
     niev++;
     return type;
+}
+
+uint32_t eval_inter_dep(expression *expr, double *hstackpos, double *lstackpos) {
+    //if (expr->var) printf("Evaluating interval for %p (%s), non-fixed %d, num %d\n", expr, expr->var->name, expr->num_nonfixed_dependencies, expr->num_dependencies);
+    uint32_t type;
+    uint32_t len;
+    expression *dep;
+    if (expr->num_nonfixed_dependencies != 0) {
+        for (int i=0; i < expr->num_dependencies; i++) {
+            dep = expr->dependencies[i];
+            if (dep->flags & EXPRESSION_FIXED) continue;
+            type = eval_inter_dep(dep, hstackpos, lstackpos);
+            if (dep->var->flags & VARIABLE_FUNCTION) continue;
+            len = type>>8;
+            if (!(dep->var->pointer) || (dep->var->type != type)) dep->var->pointer = realloc(dep->var->pointer, 2*len*sizeof(double));
+            memcpy(dep->var->pointer, lstackpos, len*sizeof(double));
+            memcpy(dep->var->pointer+len, hstackpos, len*sizeof(double));
+            //printf("interval is %08x\n", type);
+            //print_object(type, lstackpos); printf(" to "); print_object(type, hstackpos); printf("\n");
+            dep->var->type = type;
+            dep->var->flags |= VARIABLE_INTERVAL;
+        }
+    }
+    if ((expr->var) && (expr->var->flags & VARIABLE_FUNCTION)) return 0;
+    //printf("calling interval function %p from block %p\n", expr->func->inter, expr->func);
+    type = expr->func->inter(expr->func, hstackpos, lstackpos);
+    //if (expr->num_nonfixed_dependencies) printf("result is %08x: [%f, %f]\n", type, lstackpos[0], hstackpos[0]);
+    return type;
+}
+
+uint32_t eval_inter_2d(double *x, double *y, expression *expr, double *hstackpos, double *lstackpos) {
+    variable_list[0].pointer = x;
+    variable_list[0].type = 1<<8;
+    variable_list[1].pointer = y;
+    variable_list[1].type = 1<<8;
+    niev++;
+    return eval_inter_dep(expr, hstackpos, lstackpos);
+}
+
+uint32_t eval_func_dep(expression *expr, double *stackpos) {
+    uint32_t type;
+    uint32_t len;
+    expression *dep;
+    if (expr->num_nonfixed_dependencies != 0) {
+        for (int i=0; i < expr->num_dependencies; i++) {
+            dep = expr->dependencies[i];
+            if (dep->flags & EXPRESSION_FIXED) continue;
+            type = eval_func_dep(dep, stackpos);
+            if (dep->var->flags & VARIABLE_FUNCTION) continue;
+            len = type>>8;
+            if (!(dep->var->pointer) || (dep->var->type != type)) dep->var->pointer = realloc(dep->var->pointer, len*sizeof(double));
+            memcpy(dep->var->pointer, stackpos, len*sizeof(double));
+            dep->var->type = type;
+        }
+    }
+    if ((expr->var) && (expr->var->flags & VARIABLE_FUNCTION)) return 0;
+    //printf("calling interval function %p from block %p\n", expr->func->inter, expr->func);
+    type = expr->func->oper(expr->func, stackpos);
+    //if (expr->num_nonfixed_dependencies) printf("result is %08x: [%f, %f]\n", type, lstackpos[0], hstackpos[0]);
+    return type;
+}
+
+uint32_t eval_func_2d(double *x, double *y, expression *expr, double *stackpos) {
+    variable_list[0].pointer = x;
+    variable_list[0].type = 1<<8;
+    variable_list[1].pointer = y;
+    variable_list[1].type = 1<<8;
+    nfev++;
+    return eval_func_dep(expr, stackpos);
 }
 
 void est_radius(double x0, double y0, double x1, double y1, double x2, double y2, double *radius, double *speed) {
@@ -375,15 +445,17 @@ void draw_function_constant_ds(function *func, file_data *fd, uint8_t *color, ca
     draw_function_constant_ds_rec(func, fd, cr, flags, t, t_end, xp, yp, min_dt);
 }
 
-void draw_implicit_rec(function *func, file_data *fd, cairo_t *cr, uint8_t *color, double *area, int divisions) {
-    fd->variable_list[0].pointer = area;
+void draw_implicit_rec(expression *expr, file_data *fd, cairo_t *cr, uint8_t *color, double *area, int divisions) {
+    /*fd->variable_list[0].pointer = area;
     fd->variable_list[0].type = 1<<8;
     fd->variable_list[1].pointer = area+2;
-    fd->variable_list[1].type = 1<<8;
+    fd->variable_list[1].type = 1<<8;*/
     double *stackpos = fd->stack + fd->n_stack;
     double *lstackpos = fd->lstack;
-    func->inter(func, stackpos, lstackpos);
-    niev++;
+    eval_inter_2d(area, area+2, expr, stackpos, lstackpos);
+    //expr->func->inter(expr->func, stackpos, lstackpos);
+    //niev++;
+    function *func = expr->func;
     if (lstackpos[0] > 0) {
         // Everything in the interval is greater than zero
 #ifdef PLOT_USE_INEQUALITY
@@ -408,10 +480,11 @@ void draw_implicit_rec(function *func, file_data *fd, cairo_t *cr, uint8_t *colo
         //printf("    maximum depth reached on ([%f, %f], [%f, %f]) --> [%f, %f]\n", area[0], area[1], area[2], area[3], lstackpos[0], stackpos[0]);
         //cairo_rectangle(cr, SCALE_XK(area[0]), SCALE_YK(area[3]), xscale*(area[1] - area[0]), yscale*(area[3] - area[2]));
         //cairo_stroke(cr);
-        function *arg1 = func->first_arg;
+        function *arg1 = expr->func->first_arg;
         function *arg2 = arg1->next_arg;
         double x0 = area[0], x1 = area[1], y0 = area[2], y1 = area[3];
-        fd->variable_list[0].pointer = &x0;
+        double e00, e10, e11, e01;
+        /*fd->variable_list[0].pointer = &x0;
         fd->variable_list[1].pointer = &y0;
         arg1->oper(arg1, stackpos);
         double e00 = stackpos[0];
@@ -435,7 +508,14 @@ void draw_implicit_rec(function *func, file_data *fd, cairo_t *cr, uint8_t *colo
         double e01 = stackpos[0];
         arg2->oper(arg2, stackpos);
         e01 -= stackpos[0];
-        nfev += 4;
+        nfev += 4;*/
+        uint32_t (*old_oper)(void*, double*) = expr->func->oper;
+        expr->func->oper = func_sub;
+        eval_func_2d(&x0, &y0, expr, stackpos); e00 = stackpos[0];
+        eval_func_2d(&x1, &y0, expr, stackpos); e10 = stackpos[0];
+        eval_func_2d(&x1, &y1, expr, stackpos); e11 = stackpos[0];
+        eval_func_2d(&x0, &y1, expr, stackpos); e01 = stackpos[0];
+        expr->func->oper = old_oper;
 
         if ((e00 > 0) && (e10 > 0) && (e11 > 0) && (e01 > 0)) {
             // Interval calculation was wrong
@@ -655,20 +735,20 @@ void draw_implicit_rec(function *func, file_data *fd, cairo_t *cr, uint8_t *colo
         double xm = (x0 + x1)/2, ym = (y0 + y1)/2;
         //printf("subdividing ([%f, %f], [%f, %f]), %f, %f\n", x0, x1, y0, y1, xm, ym);
         area[1] = xm; area[3] = ym;
-        draw_implicit_rec(func, fd, cr, color, area, divisions+1);
+        draw_implicit_rec(expr, fd, cr, color, area, divisions+1);
         area[0] = xm; area[1] = x1; area[2] = y0; area[3] = ym;
-        draw_implicit_rec(func, fd, cr, color, area, divisions+1);
+        draw_implicit_rec(expr, fd, cr, color, area, divisions+1);
         area[0] = x0; area[1] = xm; area[2] = ym; area[3] = y1;
-        draw_implicit_rec(func, fd, cr, color, area, divisions+1);
+        draw_implicit_rec(expr, fd, cr, color, area, divisions+1);
         area[0] = xm; area[1] = x1; area[2] = ym; area[3] = y1;
-        draw_implicit_rec(func, fd, cr, color, area, divisions+1);
+        draw_implicit_rec(expr, fd, cr, color, area, divisions+1);
     }
 }
 
-void draw_implicit(function *func, file_data *fd, uint8_t *color, cairo_t *cr) {
+void draw_implicit(expression *expr, file_data *fd, uint8_t *color, cairo_t *cr) {
     SET_COLOR(cr, color);
     double temp[4] = {window_x0, window_x1, window_y0, window_y1};
-    draw_implicit_rec(func, fd, cr, color, temp, 0);
+    draw_implicit_rec(expr, fd, cr, color, temp, 0);
 }
 
 static gboolean button_press_callback (GtkWidget *event_box, GdkEventButton *event, gpointer data) {
@@ -801,14 +881,14 @@ gboolean redraw_all(GtkWidget *widget, cairo_t *cr, gpointer data_pointer) {
             } else if ((expr->func->oper == func_equals) || (expr->func->oper == func_greater)) {
                 if (!(expr->func->inter)) {
                     printf("ERROR: interval function needed for implicit plotting\n");
-                    exit(EXIT_FAILURE);
+                    continue;
                 }
 #ifdef DEBUG_PLOT
                 t3 = clock();
                 nfev = 0;
                 niev = 0;
 #endif
-                draw_implicit(expression_list[i].func, fd, expr->color, cr);
+                draw_implicit(expression_list+i, fd, expr->color, cr);
 #ifdef DEBUG_PLOT
                 t4 = clock();
                 printf("Plotted implicit expression %p (%d) in %luus, nfev: %d, niev: %d\n", expression_list+i, i+1, t4-t3, nfev, niev);
@@ -983,11 +1063,13 @@ int main (int argc, char **argv) {
     fd.n_var = 3;
     fd.n_func = 0;
     fd.n_stack = 0;
+    fd.deptable = deptable;
     
     uint32_t n_func = 0;
     uint32_t n_var = 0;
     load_file(argv[1], &fd);
     top_expr = parse_file(&fd, stringbuf);
+    expression_list[18].flags |= EXPRESSION_PLOTTABLE;
     printf("Parsing completed. %d function blocks, %d variables, %d expressions\n", fd.n_func, fd.n_var, fd.n_expr);
     ticker_target = (int)parse_double(argv[2]);
     ticker_step = (int)parse_double(argv[3]);

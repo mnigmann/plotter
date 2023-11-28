@@ -134,6 +134,14 @@ double mfac(double x) {
     return exp(mlogfac(x));
 }
 
+double msub(double x, double y) {
+    return x-y;
+}
+
+uint32_t func_sub(void *f, double *stackpos) {
+    return func_general_two_args(f, stackpos, msub);
+}
+
 uint32_t func_div(void *f, double *stackpos) {
     function *fs = (function*)f;
     function *arg = fs->first_arg;
@@ -1490,7 +1498,7 @@ const oper_data oper_list[N_OPERATORS] = {
     {func_add, "func_add", interval_add},
     {func_multiply, "func_multiply", interval_multiply},
     {func_exponentiate, "func_exponentiate", interval_exponentiate},
-    {func_user_defined, "func_user_defined", NULL},
+    {func_user_defined, "func_user_defined", interval_user_defined},
 
     {func_list, "func_list", NULL},
     {func_index, "func_index", NULL},
@@ -1503,8 +1511,8 @@ const oper_data oper_list[N_OPERATORS] = {
     {func_equals, "func_equals", interval_equals},
     {func_greater, "func_greater", interval_greater},
 
-    {func_extract_x, "func_extract_x", NULL},
-    {func_extract_y, "func_extract_y", NULL},
+    {func_extract_x, "func_extract_x", interval_extract_x},
+    {func_extract_y, "func_extract_y", interval_extract_y},
     {func_assign, "func_assign", NULL},
     {func_chain_actions, "func_chain_actions", NULL},
     {func_sum, "func_sum", NULL},

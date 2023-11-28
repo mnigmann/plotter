@@ -93,6 +93,7 @@ double parse_double(char *string) {
 function new_function(uint32_t (*oper)(void*, double*), function *next_arg, function *first_arg) {
     function block;
     block.oper = oper;
+    block.inter = NULL;
     block.value = NULL;
     block.value_type = 0;
     block.next_arg = next_arg;
@@ -127,6 +128,7 @@ expression new_expression(variable *var, function *func, expression **dependenci
     expr.func = func;
     expr.dependencies = dependencies;
     expr.num_dependencies = num_dependencies;
+    expr.num_nonfixed_dependencies = 0;
     expr.num_dependents = 0;
     expr.flags = 0;
     expr.expr_begin = expr_begin;
@@ -288,7 +290,7 @@ void evaluate_from(file_data *fd, expression *top_expr) {
     double *ptr;
     clock_t t1, t2;
     while (expr) {
-        if ((expr->func) && (expr->var) && !(expr->var->flags & (VARIABLE_FUNCTION | VARIABLE_ACTION)) && ((expr->flags & EXPRESSION_FIXED) || !(expr->flags & EXPRESSION_PLOTTABLE))) {
+        if ((expr->func) && (expr->var) && !(expr->var->flags & (VARIABLE_FUNCTION | VARIABLE_ACTION)) && (expr->flags & EXPRESSION_FIXED)) {
 #ifdef DEBUG_EVAL
             printf("evaluating variable %s, expression %p (%03ld), variable block %p, function block %p, old pointer %p, stack %p\n", expr->var->name, expr, expr-expression_list+1, expr->var, expr->func, expr->value, stack);
 #endif
@@ -320,7 +322,7 @@ void evaluate_from(file_data *fd, expression *top_expr) {
     for (expr=expression_list; expr < expression_list+n_expr; expr++) {
         if ((expr->flags & EXPRESSION_FIXED) && !(expr->var) && !(expr->flags & EXPRESSION_ACTION)) {
 #ifdef DEBUG_EVAL
-            printf("evaluating expression %p (%03ld)\n", expr, expr-expression_list+1);
+            printf("evaluating expression %p (%03ld), function %p\n", expr, expr-expression_list+1, expr->func);
             t1 = clock();
 #endif
             type = (expr->func->oper(expr->func, stack));
@@ -338,7 +340,7 @@ void evaluate_from(file_data *fd, expression *top_expr) {
             expr->value = ptr;
             expr->value_type = type;
         }
-        if (!(expr->flags & EXPRESSION_FIXED) && !(expr->flags & EXPRESSION_PLOTTABLE)) {
+        /*if (!(expr->flags & EXPRESSION_FIXED) && !(expr->flags & EXPRESSION_PLOTTABLE)) {
             double zero = 0;
             fd->variable_list[0].pointer = &zero;
             fd->variable_list[0].type = 1<<8;
@@ -346,7 +348,7 @@ void evaluate_from(file_data *fd, expression *top_expr) {
             fd->variable_list[1].type = 1<<8;
             type = expr->func->oper(expr->func, stack);
             if ((type & TYPE_MASK) == TYPE_DOUBLE) expr->flags |= EXPRESSION_PLOTTABLE;
-        }
+        }*/
         if (!(expr->func) && (expr->var)) {
 #ifdef DEBUG_EVAL
             printf("expression %p is variable %s with value ", expr, expr->var->name); print_object_short(expr->var->type, expr->var->pointer); printf("\n");
@@ -1352,7 +1354,10 @@ uint8_t varncmp(char *varname, char *target, uint32_t len) {
 void insert_interval_functions(function *func) {
     const oper_data *oper = oper_lookup(func->oper);
     func->inter = oper->inter;
-    if (!(func->inter)) return;
+    if (!(func->inter)) {
+        printf("Operator %p (%s) does not have interval function\n", func, oper->name);
+        return;
+    }
     function *arg = func->first_arg;
     while (arg) {
         insert_interval_functions(arg);
@@ -1509,7 +1514,7 @@ expression *parse_file(file_data *fd, char *stringbuf) {
     printf("A total of %d expressions found\n", n_expr);
     exprpos = expression_list;
     int subscript;
-    expression *deptable[300];
+    expression **deptable = fd->deptable;
     int deptable_ofs = 0;
     uint8_t already_exists;
     uint8_t has_xy;
@@ -1601,7 +1606,10 @@ expression *parse_file(file_data *fd, char *stringbuf) {
             } else in_command = 0;
         }
         // Variable definitions that depend on both x and y are not plottable or fixed.
-        if ((exprpos->var) && (has_xy == 0x03)) exprpos->flags &= ~(EXPRESSION_FIXED | EXPRESSION_PLOTTABLE);
+        if ((exprpos->var) && (has_xy == 0x03)) {
+            printf("Expression %p has both x and y\n", exprpos);
+            exprpos->flags &= ~(EXPRESSION_FIXED | EXPRESSION_PLOTTABLE);
+        }
         
         if ((exprpos->var) && (exprpos->var->flags & VARIABLE_FUNCTION)) {
             exprpos->func = function_list+func_pos;
@@ -1647,16 +1655,25 @@ expression *parse_file(file_data *fd, char *stringbuf) {
             int string_size = stringpos - stringbuf;
             last_pos = func_pos;
             func_pos += parse_latex_rec(line+i, read-i, function_list+func_pos, stack, variable_list, stringbuf, &stack_size, &var_size, &string_size, &flags);
+            has_xy = 0;
             for (int p=last_pos; p < func_pos; p++) {
                 if (function_list[p].oper == func_assign) {
                     exprpos->flags |= EXPRESSION_ACTION;
                     break;
                 }
-                if ((function_list[p].oper == func_value) && ((function_list[p].value == variable_list) || (function_list[p].value == variable_list+1))) {
-                    exprpos->flags |= EXPRESSION_PLOTTABLE;
-                    exprpos->flags &= ~EXPRESSION_FIXED;
+                if (function_list[p].oper == func_value) {
+                    if (function_list[p].value == variable_list) has_xy |= 0x01;
+                    else if (function_list[p].value == variable_list+1) has_xy |= 0x02;
                 }
             }
+            if (has_xy) {
+                // The expression can only be plotted if either x or y is not present
+                // or the equation is implicit
+                printf("Expression contains x or y, mask %02x, oper %p\n", has_xy, exprpos->func);
+                if (has_xy != 0x03) exprpos->flags |= EXPRESSION_PLOTTABLE;
+                exprpos->flags &= ~EXPRESSION_FIXED;
+            }
+            if ((exprpos->func->oper == func_equals) || (exprpos->func->oper == func_greater)) exprpos->flags |= EXPRESSION_PLOTTABLE;
             if (exprpos->flags & EXPRESSION_ACTION) {
                 shift_blocks(function_list, last_pos, func_pos-last_pos);
                 func_pos++;
@@ -1715,7 +1732,7 @@ expression *parse_file(file_data *fd, char *stringbuf) {
     // Print the expression table
     for (i=0; i < n_expr; i++) {
         printf("expression pointer at %p, function %p, variable %p, flags %02x, begin %d, dep %p, num %d\n", expression_list+i, expression_list[i].func, expression_list[i].var, expression_list[i].flags, expression_list[i].expr_begin, expression_list[i].dependencies, expression_list[i].num_dependencies);
-        if (expression_list[i].flags & EXPRESSION_PLOTTABLE) insert_interval_functions(expression_list[i].func);
+        insert_interval_functions(expression_list[i].func);
     }
     
     // Print the function table
@@ -1728,8 +1745,8 @@ expression *parse_file(file_data *fd, char *stringbuf) {
         else if (function_list[i].oper == func_value) printf("%02d %p: first_arg: %p, next_arg: %p, oper: %p (%s), value: %p (%f), value_type: %08x\n", i, function_list+i,
                 function_list[i].first_arg, function_list[i].next_arg, function_list[i].oper, opername, function_list[i].value, ((double*)(function_list[i].value))[0],
                 function_list[i].value_type);
-        else printf("%02d %p: first_arg: %p, next_arg: %p, oper: %p (%s), value: %p, value_type: %08x\n", i, function_list+i, function_list[i].first_arg, 
-                function_list[i].next_arg, function_list[i].oper, opername, function_list[i].value, function_list[i].value_type);
+        else printf("%02d %p: first_arg: %p, next_arg: %p, oper: %p (%s), inter %p, value: %p, value_type: %08x\n", i, function_list+i, function_list[i].first_arg, 
+                function_list[i].next_arg, function_list[i].oper, opername, function_list[i].inter, function_list[i].value, function_list[i].value_type);
     }
 
     FILE *fp = fopen("/tmp/function_list", "w");
@@ -1744,7 +1761,9 @@ expression *parse_file(file_data *fd, char *stringbuf) {
     for (i=0; i < n_expr; i++) {
         if (expression_list[i].num_dependencies > 0) {
             printf("%p (%03d)\n", expression_list+i, i+1);
-            for (int j=0; j < expression_list[i].num_dependencies; j++) printf("    %p (%03ld)\n", expression_list[i].dependencies[j], expression_list[i].dependencies[j]-expression_list+1);
+            for (int j=0; j < expression_list[i].num_dependencies; j++) {
+                printf("    %p (%03ld)\n", expression_list[i].dependencies[j], expression_list[i].dependencies[j]-expression_list+1);
+            }
         }
     }
     for (i=0; i < n_expr; i++) {
@@ -1763,7 +1782,7 @@ expression *parse_file(file_data *fd, char *stringbuf) {
         for (int j=0; j < expr->num_dependencies; j++) {
             if (!(expr->dependencies[j]->flags & EXPRESSION_FIXED)) {
                 expr->flags &= ~EXPRESSION_FIXED;
-                break;
+                expr->num_nonfixed_dependencies++;
             }
         }
         expr = expr->next_expr;
@@ -1776,7 +1795,7 @@ expression *parse_file(file_data *fd, char *stringbuf) {
     printf("\n");
     // Print the expression table
     for (i=0; i < n_expr; i++) {
-        printf("expression pointer at %p, function %p, variable %p, flags %02x, begin %d, dep %p, num %d\n", expression_list+i, expression_list[i].func, expression_list[i].var, expression_list[i].flags, expression_list[i].expr_begin, expression_list[i].dependencies, expression_list[i].num_dependencies);
+        printf("expression pointer at %p, function %p, variable %p, flags %02x, begin %d, dep %p, num %d, nf %d\n", expression_list+i, expression_list[i].func, expression_list[i].var, expression_list[i].flags, expression_list[i].expr_begin, expression_list[i].dependencies, expression_list[i].num_dependencies, expression_list[i].num_nonfixed_dependencies);
     }
 
     for (i=0; variable_list+i < varpos; i++)

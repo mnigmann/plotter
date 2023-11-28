@@ -55,6 +55,7 @@ typedef struct expression_s {
     struct function_s *func;                // Root operation of the expression
     struct expression_s **dependencies;     // List of variables that this expression depends upon
     uint8_t num_dependencies;               // Number of variables this expression depends upon
+    uint8_t num_nonfixed_dependencies;      // Number of non-fixed variables this expression depends upon
     uint8_t num_dependents;                 // Number of expressions that depend on this expression.
     int expr_begin;                         // Position on the line where the definition of the expression begins
     struct expression_s *next_expr;         // Next expression to be evaluated. Assigned during sort.
@@ -76,6 +77,7 @@ typedef struct file_data_s {
     uint32_t n_func;
     uint32_t n_stack;
     GtkWidget *drawing_area;
+    struct expression_s **deptable;
 } file_data;
 
 typedef struct oper_data_s {

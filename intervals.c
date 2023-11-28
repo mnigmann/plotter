@@ -214,7 +214,7 @@ void interval_multiply_in_place(double *hstackpos, double *lstackpos, uint32_t *
     uint32_t old_len = *result_length*step;
     if ((!(*result_type & TYPE_LIST) || (len/GET_STEP(type) < *result_length)) && (type & TYPE_LIST)) *result_length = len/GET_STEP(type);
     if (IS_TYPE(*result_type, TYPE_POINT) && IS_TYPE(type, TYPE_POINT)) {
-        printf("multiplying complex\n");
+        //printf("multiplying complex\n");
         if (!IS_TYPE(*result_type, TYPE_LIST) && IS_TYPE(type, TYPE_LIST)) {
             // Result is scalar, must convert
             double ah = hstackpos[0], al = lstackpos[0], bh = hstackpos[1], bl = lstackpos[1];
@@ -357,6 +357,7 @@ void mipow(double *hstackpos, double *lstackpos, double h, double l) {
 
     lstackpos[0] = ahbh;
     hstackpos[0] = ahbh;
+    if ((ah >= 0) && (al <= 0)) lstackpos[0] = 0;
     if (ahbl > hstackpos[0]) hstackpos[0] = ahbl;
     if (ahbl < lstackpos[0]) lstackpos[0] = ahbl;
     if (albh > hstackpos[0]) hstackpos[0] = albh;
@@ -537,6 +538,7 @@ uint32_t interval_point(void *f, double *hstackpos, double *lstackpos) {
     
     // Faster for parametric functions, no memory allocation needed
     if (!(t1 & TYPE_LIST) && !(t2 & TYPE_LIST)) {
+        //printf("Interval of point, ([%f, %f], [%f, %f])\n", lstackpos[0], hstackpos[0], lstackpos[1], hstackpos[1]);
         apply_sign(fs->value_type, hstackpos, lstackpos, 0, 2);
         return (2<<8) | TYPE_POINT;
     }
@@ -558,5 +560,64 @@ uint32_t interval_point(void *f, double *hstackpos, double *lstackpos) {
     }
     apply_sign(fs->value_type, hstackpos, lstackpos, 0, 2*result_len);
     return (result_len<<9) | TYPE_POINT;
+}
+
+uint32_t interval_extract_x(void *f, double *hstackpos, double *lstackpos) {
+    function *fs = (function*)f;
+    function *arg = fs->first_arg;
+    //printf("extracting x, arg %p, oper %p (%p), value %p, value_type %08x\n", arg, arg->oper, (func_value), arg->value, arg->value_type);
+    
+    uint32_t argtype, arglen;
+    argtype = arg->inter(arg, hstackpos, lstackpos);
+    arglen = argtype>>8;
+    //printf("extracting from type %08x\n", argtype);
+    if (!((argtype & TYPE_MASK) == TYPE_POINT)) FAIL("ERROR: cannot access x-coordinate of type %08x, block %p\n", argtype, fs);
+    for (int i=0; i < arglen; i += 2) hstackpos[i>>1] = hstackpos[i];
+    for (int i=0; i < arglen; i += 2) lstackpos[i>>1] = lstackpos[i];
+    return ((argtype>>1) & 0xffffff00) | ((argtype&0xff) & ~TYPE_MASK);
+}
+
+uint32_t interval_extract_y(void *f, double *hstackpos, double *lstackpos) {
+    function *fs = (function*)f;
+    function *arg = fs->first_arg;
+    
+    uint32_t argtype, arglen;
+    argtype = arg->inter(arg, hstackpos, lstackpos);
+    arglen = argtype>>8;
+    if (!((argtype & TYPE_MASK) == TYPE_POINT)) FAIL("ERROR: cannot access y-coordinate of type %08x\n", argtype);
+    for (int i=0; i < arglen; i += 2) hstackpos[i>>1] = hstackpos[i+1];
+    for (int i=0; i < arglen; i += 2) lstackpos[i>>1] = lstackpos[i+1];
+    return ((argtype>>1) & 0xffffff00) | ((argtype&0xff) & ~TYPE_MASK);
+}
+
+uint32_t interval_user_defined(void *f, double *hstackpos, double *lstackpos) {
+    function *fs = (function*)f;
+    function *arg = fs->first_arg;
+    function *target = fs->value;
+    // If target is an operation, then target->next_arg will have been assigned to point to the variable for the function's first argument
+    // As many variables will be filled as were given to the function
+    variable *target_arg = (variable*)(target->next_arg);
+    uint32_t st = 0;
+    uint32_t type, len;
+    uint32_t varnum = 0;
+    //printf("user_defined, target %p, target arg %p\n", target, target_arg);
+    do {
+        type = arg->inter(arg, hstackpos, lstackpos+st);
+        len = type>>8;
+        memcpy(lstackpos+st+len, hstackpos, len*sizeof(double));
+        target_arg[varnum].pointer = lstackpos+st;
+        target_arg[varnum].type = type;
+        target_arg[varnum].flags |= VARIABLE_INTERVAL;
+        st += 2*len;
+        //printf("argument is %08x:", type); print_object(type, target_arg[varnum].pointer); printf(" to "); print_object(type, target_arg[varnum].pointer+len); printf("\n");
+        varnum++;
+        arg = arg->next_arg;
+    } while (arg);
+    type = target->inter(target, hstackpos+st, lstackpos+st);
+    len = type>>8;
+    // Shrink the stack by removing unused values
+    apply_sign(fs->value_type, hstackpos, lstackpos, st, len);
+    //printf("return type is %08x\n", type); print_object(type, stackpos); printf("\n");
+    return type;
 }
 

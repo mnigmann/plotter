@@ -1,0 +1,5 @@
+A\left(v\right)=v.x^{2}+v.y^{2}
+p=\left(x,y\right)
+C\left(v\right)=vv+0.2p
+C_{2}\left(v\right)=C\left(C\left(C\left(C\left(v\right)\right)\right)\right)
+4=A\left(C_{2}\left(C_{2}\left(0.2p\right)\right)\right)
