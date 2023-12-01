@@ -22,7 +22,7 @@ void insert_rec(GtkTreeStore *store, function *func, GtkTreeIter *parent, char *
     GtkTreeIter iter;
     printf("inserting %p, oper %p, value %p, first_arg %p, next_arg %p\n", func, func->oper, func->value, func->first_arg, func->next_arg);
     uint32_t v1 = sprintf(stringbuf, "%p", func)+1;
-    oper_data *oper = oper_lookup(func->oper);
+    const oper_data *oper = oper_lookup(func->oper);
     uint32_t v2;
     if (oper) v2 = v1+sprintf(stringbuf+v1, "%s", oper->name)+1;
     else v2 = v1+sprintf(stringbuf+v1, "%p", func->oper)+1;

@@ -1120,9 +1120,18 @@ int parse_latex_rec(char *latex, int end, function *function_list, double *stack
                     }
                 }
                 if (varindex == -1) {
-                    for (int j=0; j < *var_size; j++) printf("variable %s at %p has flags %02x\n", variable_list[j].name, variable_list+j, variable_list[j].flags);
-                    printf("ERROR: variable %.*s not found!\n", cmd_len+1, latex+cmd_start-1);
-                    exit(EXIT_FAILURE);
+                    // If the variable is not found, we may have to create one. The variable will remain
+                    // in-scope until parsing is done. The PARSE_NEWVAR flag is set
+                    if ((*var_size > 0) && (variable_list[*var_size-1].flags & VARIABLE_IN_SCOPE) && (variable_list[*var_size-1].flags & VARIABLE_XYLIKE)){
+                        printf("ERROR: variable %.*s not found!\n", cmd_len+1, latex+cmd_start-1);
+                        exit(EXIT_FAILURE);
+                    }
+                    printf("Creating variable %.*s\n", cmd_len+1, latex+cmd_start-1);
+                    strncpy(stringbuf + *string_size, latex+cmd_start-1, cmd_len+1);
+                    variable_list[*var_size] = new_variable(stringbuf + *string_size, 0, VARIABLE_XLIKE | VARIABLE_IN_SCOPE, NULL);
+                    varindex = *var_size;
+                    *var_size += 1;
+                    *string_size += cmd_len+2;
                 }
                 if (variable_list[varindex].flags & VARIABLE_FUNCTION) {
                     // Function found
@@ -1655,6 +1664,15 @@ expression *parse_file(file_data *fd, char *stringbuf) {
             int string_size = stringpos - stringbuf;
             last_pos = func_pos;
             func_pos += parse_latex_rec(line+i, read-i, function_list+func_pos, stack, variable_list, stringbuf, &stack_size, &var_size, &string_size, &flags);
+            if ((exprpos->var) && (strcmp(exprpos->var->name, "r") == 0)) {
+                printf("Polar expression found\n");
+                shift_blocks(function_list, last_pos, func_pos-last_pos);
+                func_pos++;
+                function_list[last_pos] = new_function(func_convert_polar, NULL, function_list+last_pos+1);
+                function_list[last_pos+1].next_arg = function_list+func_pos;
+                function_list[func_pos] = new_value(variable_list+3, 0x40, NULL);
+                func_pos++;
+            }
             has_xy = 0;
             for (int p=last_pos; p < func_pos; p++) {
                 if (function_list[p].oper == func_assign) {
@@ -1662,6 +1680,7 @@ expression *parse_file(file_data *fd, char *stringbuf) {
                     break;
                 }
                 if (function_list[p].oper == func_value) {
+                    if (function_list[p].value == variable_list+3) function_list[p].value = (void*)(variable_list);
                     if (function_list[p].value == variable_list) has_xy |= 0x01;
                     else if (function_list[p].value == variable_list+1) has_xy |= 0x02;
                 }

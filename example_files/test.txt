@@ -16,6 +16,5 @@ a\to a+1
 x\cos\left(y\right)+y\cos\left(x\right)>0
 #\int_{0}^{x}\sin\left(\sin\left(t\right)\right)dt
 \int_{1}^{x}\arctan\left(t\right)dt
-p=\left(x,y\right)
-p.x^{2}+p.y^{2}=25
 #\sum_{i=1}^{100000000}\frac{1}{i^{2}}
+r=\theta

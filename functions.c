@@ -40,22 +40,12 @@ uint32_t func_general_two_args(void *f, double *stackpos, double (*oper)(double,
     function *arg = fs->first_arg;
     uint32_t t1, t2, l1, l2;
     double *val1, *val2;
-    if (arg->oper) {
-        t1 = arg->oper(arg, stackpos);
-        val1 = stackpos;
-    } else {
-        t1 = ((arg->value_type)&0x40 ? ((variable*)(arg->value))->type : arg->value_type);
-        val1 = ((arg->value_type)&0x40 ? ((variable*)(arg->value))->pointer : (double*)(arg->value));
-    }
+    t1 = arg->oper(arg, stackpos);
+    val1 = stackpos;
     l1 = t1>>8;
     arg = arg->next_arg;
-    if (arg->oper) {
-        val2 = stackpos+(l1?l1:1);
-        t2 = arg->oper(arg, val2);
-    } else {
-        t2 = ((arg->value_type)&0x40 ? ((variable*)(arg->value))->type : arg->value_type);
-        val2 = ((arg->value_type)&0x40 ? ((variable*)(arg->value))->pointer : (double*)(arg->value));
-    }
+    val2 = stackpos+(l1?l1:1);
+    t2 = arg->oper(arg, val2);
     l2 = t2>>8;
     //printf("func_general_two_args: "); print_object(t1, val1); printf(" and "); print_object(t2, val2); printf("\n");
     if (!(t1 & TYPE_LIST) && !(t2 & TYPE_LIST)) {
@@ -1479,8 +1469,26 @@ uint32_t func_integrate(void *f, double *stackpos) {
     //}
 }
 
+uint32_t func_convert_polar(void *f, double *stackpos) {
+    function *fs = (function*)f;
+    function *radius = fs->first_arg;
+    function *angle = radius->next_arg;
 
-#define N_OPERATORS 38
+    uint32_t atype = angle->oper(angle, stackpos);
+    double sine = sin(stackpos[0]);
+    double cosine = cos(stackpos[0]);
+    uint32_t rtype = radius->oper(radius, stackpos);
+    uint32_t len = rtype>>8;
+
+    for (int i=len; i >= 0; i--) {
+        stackpos[2*i+1] = stackpos[i]*sine;
+        stackpos[2*i] = stackpos[i]*cosine;
+    }
+    return (len<<9) | (rtype & TYPE_LIST) | TYPE_POINT;
+}
+
+
+#define N_OPERATORS 39
 const oper_data oper_list[N_OPERATORS] = {
     {func_value, "func_value", interval_value},
 
@@ -1523,7 +1531,9 @@ const oper_data oper_list[N_OPERATORS] = {
     {func_sort, "func_sort", NULL},
     {func_join, "func_join", NULL},
     {func_length, "func_length", NULL},
-    {func_integrate, "func_integrate", NULL}
+    {func_integrate, "func_integrate", NULL},
+
+    {func_convert_polar, "func_convert_polar", NULL}
 };
 
 const oper_data *oper_lookup(uint32_t (*ptr)(void*, double*)) {

@@ -1053,6 +1053,7 @@ int main (int argc, char **argv) {
     variable_list[1] = new_variable("y", 0, VARIABLE_IN_SCOPE | VARIABLE_INTERVAL, NULL);
     double pi = M_PI;
     variable_list[2] = new_variable("\\pi", 1<<8, VARIABLE_IN_SCOPE, &pi);
+    variable_list[3] = new_variable("\\theta", 0, VARIABLE_IN_SCOPE, NULL);
 
     fd.expression_list = expression_list;
     fd.variable_list = variable_list;
@@ -1060,7 +1061,7 @@ int main (int argc, char **argv) {
     fd.stack = stack;
     fd.lstack = lstack;
     fd.n_expr = 0;
-    fd.n_var = 3;
+    fd.n_var = 4;
     fd.n_func = 0;
     fd.n_stack = 0;
     fd.deptable = deptable;
