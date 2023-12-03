@@ -25,6 +25,7 @@ uint32_t func_max(void *f, double *stackpos);
 uint32_t func_sine(void *f, double *stackpos);
 uint32_t func_cosine(void *f, double *stackpos);
 uint32_t func_arctan(void *f, double *stackpos);
+uint32_t func_arcsin(void *f, double *stackpos);
 uint32_t func_log(void *f, double *stackpos);
 uint32_t func_sub(void *f, double *stackpos);
 uint32_t func_exp(void *f, double *stackpos);
@@ -45,6 +46,10 @@ uint32_t func_ellipsis(void *f, double *stackpos);
 uint32_t func_for(void *f, double *stackpos);
 uint32_t func_equals(void *f, double *stackpos);
 uint32_t func_greater(void *f, double *stackpos);
+uint32_t func_compare_single(void *f, double *stackpos);
+uint32_t func_compare(void *f, double *stackpos);
+uint32_t func_compare_sub_single(void *f, double *stackpos);
+uint32_t func_compare_sub(void *f, double *stackpos);
 
 uint32_t func_extract_x(void *f, double *stackpos);
 uint32_t func_extract_y(void *f, double *stackpos);

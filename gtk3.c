@@ -456,10 +456,15 @@ void draw_implicit_rec(expression *expr, file_data *fd, cairo_t *cr, uint8_t *co
     //expr->func->inter(expr->func, stackpos, lstackpos);
     //niev++;
     function *func = expr->func;
+#ifdef PLOT_USE_INEQUALITY
+    uint8_t ineq = 0;
+    if (func->oper == func_compare_sub_single) ineq = 1;
+    if (func->oper == func_compare_sub) ineq = 1;
+#endif
     if (lstackpos[0] > 0) {
         // Everything in the interval is greater than zero
 #ifdef PLOT_USE_INEQUALITY
-        if (func->oper == func_greater) {
+        if (ineq) {
             SET_COLOR_OPACITY(cr, color, 0.5);
             cairo_rectangle(cr, SCALE_XK(area[0]), SCALE_YK(area[3]), xscale*(area[1] - area[0]), yscale*(area[3] - area[2]));
             cairo_fill(cr);
@@ -509,18 +514,15 @@ void draw_implicit_rec(expression *expr, file_data *fd, cairo_t *cr, uint8_t *co
         arg2->oper(arg2, stackpos);
         e01 -= stackpos[0];
         nfev += 4;*/
-        uint32_t (*old_oper)(void*, double*) = expr->func->oper;
-        expr->func->oper = func_sub;
         eval_func_2d(&x0, &y0, expr, stackpos); e00 = stackpos[0];
         eval_func_2d(&x1, &y0, expr, stackpos); e10 = stackpos[0];
         eval_func_2d(&x1, &y1, expr, stackpos); e11 = stackpos[0];
         eval_func_2d(&x0, &y1, expr, stackpos); e01 = stackpos[0];
-        expr->func->oper = old_oper;
 
         if ((e00 > 0) && (e10 > 0) && (e11 > 0) && (e01 > 0)) {
             // Interval calculation was wrong
 #ifdef PLOT_USE_INEQUALITY
-            if (func->oper == func_greater) {
+            if (ineq) {
                 SET_COLOR_OPACITY(cr, color, 0.5);
                 cairo_rectangle(cr, SCALE_XK(area[0]), SCALE_YK(area[3]), xscale*(area[1] - area[0]), yscale*(area[3] - area[2]));
                 cairo_fill(cr);
@@ -567,7 +569,7 @@ void draw_implicit_rec(expression *expr, file_data *fd, cairo_t *cr, uint8_t *co
                 // be zero and they must be on opposite corners. If we sample two adjacent
                 // corners, at least one will not be zero
 #ifdef PLOT_USE_INEQUALITY
-                if (func->oper == func_greater) {
+                if (ineq) {
                     SET_COLOR_OPACITY(cr, color, 0.5);
                     if ((e00 > 0) || (e10 < 0)) {
                         cairo_move_to(cr, sx0, sy0);
@@ -602,7 +604,7 @@ void draw_implicit_rec(expression *expr, file_data *fd, cairo_t *cr, uint8_t *co
                 cairo_move_to(cr, sspos, sy0);
                 cairo_line_to(cr, snpos, sy1);
 #ifdef PLOT_USE_INEQUALITY
-                if (func->oper == func_greater) {
+                if (ineq) {
                     cairo_stroke_preserve(cr);
                     SET_COLOR_OPACITY(cr, color, 0.5);
                     if ((e00 > 0) || (e10 < 0)) {
@@ -625,7 +627,7 @@ void draw_implicit_rec(expression *expr, file_data *fd, cairo_t *cr, uint8_t *co
                 cairo_move_to(cr, sx0, swpos);
                 cairo_line_to(cr, sx1, sepos);
 #ifdef PLOT_USE_INEQUALITY
-                if (func->oper == func_greater) {
+                if (ineq) {
                     cairo_stroke_preserve(cr);
                     SET_COLOR_OPACITY(cr, color, 0.5);
                     if ((e00 > 0) || (e01 < 0)) {
@@ -646,7 +648,7 @@ void draw_implicit_rec(expression *expr, file_data *fd, cairo_t *cr, uint8_t *co
                 cairo_move_to(cr, sx1, sepos);
                 cairo_line_to(cr, snpos, sy1);
 #ifdef PLOT_USE_INEQUALITY
-                if (func->oper == func_greater) {
+                if (ineq) {
                     cairo_stroke_preserve(cr);
                     SET_COLOR_OPACITY(cr, color, 0.5);
                     if ((e11 > 0) || (e01 < 0)) {
@@ -667,7 +669,7 @@ void draw_implicit_rec(expression *expr, file_data *fd, cairo_t *cr, uint8_t *co
                 cairo_move_to(cr, sx1, sepos);
                 cairo_line_to(cr, sspos, sy0);
 #ifdef PLOT_USE_INEQUALITY
-                if (func->oper == func_greater) {
+                if (ineq) {
                     cairo_stroke_preserve(cr);
                     SET_COLOR_OPACITY(cr, color, 0.5);
                     if ((e10 > 0) || (e00 < 0)) {
@@ -688,7 +690,7 @@ void draw_implicit_rec(expression *expr, file_data *fd, cairo_t *cr, uint8_t *co
                 cairo_move_to(cr, sx0, swpos);
                 cairo_line_to(cr, sspos, sy0);
 #ifdef PLOT_USE_INEQUALITY
-                if (func->oper == func_greater) {
+                if (ineq) {
                     cairo_stroke_preserve(cr);
                     SET_COLOR_OPACITY(cr, color, 0.5);
                     if ((e10 < 0) || (e00 > 0)) {
@@ -709,7 +711,7 @@ void draw_implicit_rec(expression *expr, file_data *fd, cairo_t *cr, uint8_t *co
                 cairo_move_to(cr, sx0, swpos);
                 cairo_line_to(cr, snpos, sy1);
 #ifdef PLOT_USE_INEQUALITY
-                if (func->oper == func_greater) {
+                if (ineq) {
                     cairo_stroke_preserve(cr);
                     SET_COLOR_OPACITY(cr, color, 0.5);
                     if ((e01 > 0) || (e00 < 0)) {
@@ -748,7 +750,12 @@ void draw_implicit_rec(expression *expr, file_data *fd, cairo_t *cr, uint8_t *co
 void draw_implicit(expression *expr, file_data *fd, uint8_t *color, cairo_t *cr) {
     SET_COLOR(cr, color);
     double temp[4] = {window_x0, window_x1, window_y0, window_y1};
+    uint32_t (*old_oper)(void*, double*) = expr->func->oper;
+    if (expr->func->oper == func_equals) expr->func->oper = func_sub;
+    else if (expr->func->oper == func_compare_single) expr->func->oper = func_compare_sub_single;
+    else if (expr->func->oper == func_compare) expr->func->oper = func_compare_sub;
     draw_implicit_rec(expr, fd, cr, color, temp, 0);
+    expr->func->oper = old_oper;
 }
 
 static gboolean button_press_callback (GtkWidget *event_box, GdkEventButton *event, gpointer data) {
@@ -878,7 +885,7 @@ gboolean redraw_all(GtkWidget *widget, cairo_t *cr, gpointer data_pointer) {
                 t4 = clock();
                 printf("Plotted polygon expression %p (%d) in %luus\n", expression_list+i, i+1, t4-t3);
 #endif
-            } else if ((expr->func->oper == func_equals) || (expr->func->oper == func_greater)) {
+            } else if ((expr->func->oper == func_equals) || (expr->func->oper == func_compare) || (expr->func->oper == func_compare_single)) {
                 if (!(expr->func->inter)) {
                     printf("ERROR: interval function needed for implicit plotting\n");
                     continue;

@@ -280,6 +280,10 @@ uint32_t func_arctan(void *f, double *stackpos) {
     else return func_general_one_arg(f, stackpos, atan);
 }
 
+uint32_t func_arcsin(void *f, double *stackpos) {
+    return func_general_one_arg(f, stackpos, asin);
+}
+
 uint8_t add_in_place(double *acc, double *val, uint32_t *result_type, uint32_t *result_length, uint32_t type) {
     uint32_t len = type>>8;
     if ((*result_type & TYPE_MASK) != (type & TYPE_MASK)) {
@@ -835,8 +839,20 @@ double equals(double a, double b) {
     return (a==b ? 1.0 : 0.0);
 }
 
-double greater(double a, double b) {
+double mgt(double a, double b) {
     return (a>b ? 1.0 : 0.0);
+}
+
+double mge(double a, double b) {
+    return (a>=b ? 1.0 : 0.0);
+}
+
+double mlt(double a, double b) {
+    return (a<b ? 1.0 : 0.0);
+}
+
+double mle(double a, double b) {
+    return (a<=b ? 1.0 : 0.0);
 }
 
 uint32_t func_equals(void *f, double *stackpos) {
@@ -847,8 +863,146 @@ uint32_t func_equals(void *f, double *stackpos) {
 
 uint32_t func_greater(void *f, double *stackpos) {
     //printf("checking equals\n");
-    uint32_t res = func_general_two_args(f, stackpos, greater);
+    uint32_t res = func_general_two_args(f, stackpos, mgt);
     return res | TYPE_BOOLEAN;
+}
+
+uint32_t func_compare_single(void *f, double *stackpos) {
+    function *fs = (function*)f;
+    function *arg = fs->first_arg;
+    uint64_t mp = *((uint64_t*)(fs->value));
+    if (mp == 0) return func_general_two_args(f, stackpos, mgt);
+    if (mp == 1) return func_general_two_args(f, stackpos, mlt);
+    if (mp == 2) return func_general_two_args(f, stackpos, mge);
+    if (mp == 3) return func_general_two_args(f, stackpos, mle);
+    return 0;
+}
+
+uint32_t func_compare_sub_single(void *f, double *stackpos) {
+    function *fs = (function*)f;
+    function *arg = fs->first_arg;
+    uint64_t mp = *((uint64_t*)(fs->value));
+    uint32_t old_type = fs->value_type;
+    // Set the sign bit if the operation is lt or le
+    fs->value_type = mp<<7;
+    uint32_t type = func_general_two_args(f, stackpos, msub);
+    fs->value_type = old_type;
+    return type;
+}
+
+uint32_t func_compare(void *f, double *stackpos) {
+    function *fs = (function*)f;
+    function *arg = fs->first_arg;
+    uint64_t cmp = *((uint64_t*)(fs->value));
+    double (*cmp_oper)(double, double);
+    uint32_t result_type = 0;
+    uint32_t result_len = 0;
+    uint32_t last_len = 0;
+    uint32_t type, len, newlen;
+    double result=1, last;
+    printf("comparing %016llx\n", cmp);
+    result_type = arg->oper(arg, stackpos);
+    len = result_type>>8;
+    memcpy(stackpos+len, stackpos, len*sizeof(double));
+    last_len = len; result_len = len;
+    printf("initial operand %08x ", result_type); print_object(result_type, stackpos); printf("\n");
+    arg = arg->next_arg;
+    while (arg) {
+        switch (cmp & 3) {
+            case 0:
+                cmp_oper = mgt;
+                break;
+            case 1:
+                cmp_oper = mlt;
+                break;
+            case 2:
+                cmp_oper = mge;
+                break;
+            case 3:
+                cmp_oper = mle;
+                break;
+        }
+        cmp = cmp >> 2;
+        type = arg->oper(arg, stackpos+result_len+last_len);
+        len = type>>8;
+        if ((type & TYPE_LIST) && !(result_type & TYPE_LIST)) {
+            // If the result is not a list but the operand is, expand the result array
+            for (int i=last_len+len-1; i >= 0; i--) stackpos[len+i] = stackpos[result_len+i];
+            for (int i=1; i < len; i++) stackpos[i] = stackpos[0];
+            result_len = len;
+            result_type |= TYPE_LIST;
+        }
+        newlen = result_len;
+        if (!(result_type & TYPE_LIST) || ((type & TYPE_LIST) && (len < result_len))) newlen = len;
+        for (int i=newlen-1; i >= 0; i--) {
+            stackpos[i] = stackpos[i] * cmp_oper(stackpos[result_len+i%last_len], stackpos[result_len+last_len+i%len]);
+        }
+        for (int i=0; i < len; i++) stackpos[newlen+i] = stackpos[result_len+last_len+i];
+        result_len = newlen;
+        last_len = len;
+        arg = arg->next_arg;
+    }
+    if (result_len == 0) {
+        stackpos[0] = result;
+        result_len = 1;
+    }
+    return (result_len << 8) | (result_type & TYPE_LIST) | TYPE_BOOLEAN;
+}
+
+uint32_t func_compare_sub(void *f, double *stackpos) {
+    function *fs = (function*)f;
+    function *arg = fs->first_arg;
+    uint64_t cmp = *((uint64_t*)(fs->value));
+    double (*cmp_oper)(double, double);
+    uint32_t result_type = 0;
+    uint32_t result_len = 0;
+    uint32_t last_len = 0;
+    uint32_t type, len, newlen;
+    double result=1, last;
+    result_type = arg->oper(arg, stackpos);
+    len = result_type>>8;
+    memcpy(stackpos+len, stackpos, len*sizeof(double));
+    last_len = len; result_len = len;
+    arg = arg->next_arg;
+    while (arg) {
+        type = arg->oper(arg, stackpos+result_len+last_len);
+        len = type>>8;
+        if ((type & TYPE_LIST) && !(result_type & TYPE_LIST)) {
+            // If the result is not a list but the operand is, expand the result array
+            for (int i=last_len+len-1; i >= 0; i--) stackpos[len+i] = stackpos[result_len+i];
+            for (int i=1; i < len; i++) stackpos[i] = stackpos[0];
+            result_len = len;
+            result_type |= TYPE_LIST;
+        }
+        newlen = result_len;
+        if (!(result_type & TYPE_LIST) || ((type & TYPE_LIST) && (len < result_len))) newlen = len;
+        int i2;
+        if (cmp & 1) {
+            // less than
+            for (int i=newlen-1; i >= 0; i--) {
+                i2 = result_len+i%last_len;
+                stackpos[i2] = stackpos[result_len+last_len+i%len] - stackpos[i2];
+                if (stackpos[i2] < stackpos[i]) stackpos[i] = stackpos[i2];
+            }
+        } else {
+            // greater than
+            for (int i=newlen-1; i >= 0; i--) {
+                i2 = result_len+i%last_len;
+                stackpos[i2] = stackpos[i2] - stackpos[result_len+last_len+i%len];
+                if (stackpos[i2] < stackpos[i]) stackpos[i] = stackpos[i2];
+            }
+        }
+        cmp = cmp >> 2;
+        for (int i=0; i < len; i++) stackpos[newlen+i] = stackpos[result_len+last_len+i];
+        result_len = newlen;
+        last_len = len;
+        arg = arg->next_arg;
+    }
+    if (result_len == 0) {
+        stackpos[0] = result;
+        result_len = 1;
+    }
+    return (result_len << 8) | (result_type & TYPE_LIST);
 }
 
 uint32_t func_extract_x(void *f, double *stackpos) {
@@ -1488,7 +1642,7 @@ uint32_t func_convert_polar(void *f, double *stackpos) {
 }
 
 
-#define N_OPERATORS 39
+#define N_OPERATORS 42
 const oper_data oper_list[N_OPERATORS] = {
     {func_value, "func_value", interval_value},
 
@@ -1499,6 +1653,7 @@ const oper_data oper_list[N_OPERATORS] = {
     {func_sine, "func_sine", interval_sine},
     {func_cosine, "func_cosine", interval_cosine},
     {func_arctan, "func_arctan", NULL},
+    {func_arcsin, "func_arcsin", NULL},
     {func_log, "func_log", NULL},
     {func_exp, "func_exp", interval_exp},
     {func_factorial, "func_factorial", NULL},
@@ -1518,6 +1673,8 @@ const oper_data oper_list[N_OPERATORS] = {
     {func_for, "func_for", NULL},
     {func_equals, "func_equals", interval_equals},
     {func_greater, "func_greater", interval_greater},
+    {func_compare_single, "func_compare_single", interval_compare_single},
+    {func_compare, "func_compare", interval_compare},
 
     {func_extract_x, "func_extract_x", interval_extract_x},
     {func_extract_y, "func_extract_y", interval_extract_y},

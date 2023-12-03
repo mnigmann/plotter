@@ -274,6 +274,26 @@ int get_next_match(char *latex, int start, int end, char target) {
     return -1;
 }
 
+int get_next_match_string(char *latex, int start, int end, char* target) {
+    int n_braces = 0;
+    int n_leftright = 0;
+    end -= strlen(target)-1;
+    for (int i=start; i < end; i++) {
+        if (latex[i] == '{') n_braces++;
+        else if (latex[i] == '}') n_braces--;
+        else if (strncmp(latex+i, "\\left", 5) == 0) {
+            n_leftright++;
+            i += 4;
+        } else if (strncmp(latex+i, "\\right", 6) == 0) {
+            n_leftright--;
+            i += 5;
+        } else if ((strcmp(latex+i, target) == 0) && (n_leftright == 0) && (n_braces == 0)) {
+            return i;
+        }
+    }
+    return -1;
+}
+
 void evaluate_from(file_data *fd, expression *top_expr) {
     // Print the expression table
     //for (int i=0; i < n_expr; i++)
@@ -484,6 +504,7 @@ int parse_latex_rec(char *latex, int end, function *function_list, double *stack
     int last_pos = 0;
     uint8_t flags;
     int subscript, superscript, start;
+    int cmd_end, cmd_len, cmd_start, arg1_end, arg1_start, arg2_end, arg2_start;
 
     // Decompose commas
     last_term = 0;
@@ -525,19 +546,68 @@ int parse_latex_rec(char *latex, int end, function *function_list, double *stack
         func_pos += PARSE_LATEX_REC(latex+index_equals, end-index_equals, function_list+func_pos);
         return func_pos;
     }
+    index_equals = 0;
+    int num_cmp = 0;
+    uint64_t cmp_type = 0;
+
     n_braces = 0;
     n_leftright = 0;
-    index_equals = get_next_match(latex, 0, end, '>');
-    if (index_equals >= 0) {
-        function_list[0] = new_function(func_greater, NULL, function_list+1);
-        func_pos++;
-        func_pos += PARSE_LATEX_REC(latex, index_equals, function_list+func_pos);
-        function_list[1].next_arg = function_list + func_pos;
-        index_equals++;
-        if (latex[index_equals] == ' ') index_equals++;
-        func_pos += PARSE_LATEX_REC(latex+index_equals, end-index_equals, function_list+func_pos);
+    arg2_start = 0;
+    for (int i=0; i < end; i++) {
+        if (latex[i] == '{') n_braces++;
+        else if (latex[i] == '}') n_braces--;
+        else if (strncmp(latex+i, "\\left", 5) == 0) {
+            n_leftright++;
+            i += 4;
+            arg1_start = -1;
+            continue;
+        } else if (strncmp(latex+i, "\\right", 6) == 0) {
+            n_leftright--;
+            i += 5;
+            arg1_start = -1;
+            continue;
+        } else if ((latex[i] == '>') && (n_leftright == 0) && (n_braces == 0)) {
+            arg1_start = arg2_start;
+            arg2_start = i+1;
+        } else if ((latex[i] == '<') && (n_leftright == 0) && (n_braces == 0)) {
+            arg1_start = arg2_start;
+            arg2_start = i+1;
+            cmp_type |= (1 << (2*num_cmp));
+        } else if ((strcmp(latex+i, "\\le") == 0) && (n_leftright == 0) && (n_braces == 0)) {
+            arg1_start = arg2_start;
+            arg2_start = i+3;
+            cmp_type |= (2 << (2*num_cmp));
+        } else if ((strcmp(latex+i, "\\ge") == 0) && (n_leftright == 0) && (n_braces == 0)) {
+            arg1_start = arg2_start;
+            arg2_start = i+3;
+            cmp_type |= (3 << (2*num_cmp));
+        } else arg1_start = -1;
+        if (arg1_start >= 0) {
+            if (num_cmp == 0) {
+                *stack_size += 1;
+                function_list[0] = new_function(func_compare, NULL, function_list+1);
+                func_pos = 1;
+            } else {
+                function_list[last_pos].next_arg = function_list+func_pos;
+            }
+            printf("found comparison term %.*s, %016llx\n", i-arg1_start, latex+arg1_start, cmp_type);
+            last_pos = func_pos;
+            func_pos += PARSE_LATEX_REC(latex+arg1_start, i - arg1_start, function_list+func_pos);
+            num_cmp++;
+        }
+    }
+    if (num_cmp) {
+        printf("Comparison chain found with %016llx, %d terms\n", cmp_type, num_cmp);
+        function_list[last_pos].next_arg = function_list+func_pos;
+        last_pos = func_pos;
+        func_pos += PARSE_LATEX_REC(latex+arg2_start, end - arg2_start, function_list+func_pos);
+        if (num_cmp == 1) function_list[0].oper = func_compare_single;
+        *((uint64_t*)(stack+*stack_size)) = cmp_type;
+        function_list[0].value = stack+*stack_size;
+        *stack_size += 1;
         return func_pos;
     }
+
 
     // Decompose actions
     for (int i=0; i < end; i++) {
@@ -628,7 +698,6 @@ int parse_latex_rec(char *latex, int end, function *function_list, double *stack
     printf("Decomposing multiplication\n");
     uint8_t in_command = 0;
     int idx_end = 0;
-    int cmd_end, cmd_len, cmd_start, arg1_end, arg1_start, arg2_end, arg2_start;
     func_pos = 0;
     uint32_t (*oper)(void*, double*);
     for (int i=0; i < end; i++) {
@@ -717,6 +786,13 @@ int parse_latex_rec(char *latex, int end, function *function_list, double *stack
                 arg1_end -= 6;
                 arg1_start = cmd_end+6;
                 oper = func_arctan;
+            } else if ((cmd_len == 6) && (strncmp(latex+cmd_start, "arcsin", cmd_len)==0)) {
+                arg1_end = extract_parenthetical(latex, cmd_end);
+                printf("multiply arcsine %.*s\n", arg1_end - cmd_end - 12, latex+cmd_end+6);
+                i = arg1_end;
+                arg1_end -= 6;
+                arg1_start = cmd_end+6;
+                oper = func_arcsin;
             } else if ((cmd_len == 2) && (strncmp(latex+cmd_start, "ln", cmd_len)==0)) {
                 arg1_end = extract_parenthetical(latex, cmd_end);
                 printf("multiply ln %.*s\n", arg1_end - cmd_end - 12, latex+cmd_end+6);
@@ -1692,7 +1768,8 @@ expression *parse_file(file_data *fd, char *stringbuf) {
                 if (has_xy != 0x03) exprpos->flags |= EXPRESSION_PLOTTABLE;
                 exprpos->flags &= ~EXPRESSION_FIXED;
             }
-            if ((exprpos->func->oper == func_equals) || (exprpos->func->oper == func_greater)) exprpos->flags |= EXPRESSION_PLOTTABLE;
+            // Special case for implicit functions
+            if ((exprpos->func->oper == func_equals) || (exprpos->func->oper==func_compare) || (exprpos->func->oper == func_compare_single)) exprpos->flags |= EXPRESSION_PLOTTABLE;
             if (exprpos->flags & EXPRESSION_ACTION) {
                 shift_blocks(function_list, last_pos, func_pos-last_pos);
                 func_pos++;

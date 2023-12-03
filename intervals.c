@@ -465,13 +465,91 @@ uint32_t interval_equals(void *f, double *hstackpos, double *lstackpos) {
     return interval_general_two_args(f, hstackpos, lstackpos, miequals);
 }
 
-void migreater(double *hstackpos, double *lstackpos, double h, double l) {
+void migt(double *hstackpos, double *lstackpos, double h, double l) {
     hstackpos[0] -= l;
     lstackpos[0] -= h;
 }
 
+void milt(double *hstackpos, double *lstackpos, double h, double l) {
+    l -= hstackpos[0];
+    h -= lstackpos[0];
+    hstackpos[0] = h;
+    lstackpos[0] = l;
+}
+
+uint32_t interval_compare_single(void *f, double *hstackpos, double *lstackpos) {
+    function *fs = (function*)f;
+    function *arg = fs->first_arg;
+    uint64_t cmp = *((uint64_t*)(fs->value));
+    if (cmp & 1) return interval_general_two_args(f, hstackpos, lstackpos, milt);
+    else return interval_general_two_args(f, hstackpos, lstackpos, migt);
+}
+
+uint32_t interval_compare(void *f, double *hstackpos, double *lstackpos) {
+    function *fs = (function*)f;
+    function *arg = fs->first_arg;
+    uint64_t cmp = *((uint64_t*)(fs->value));
+    uint32_t result_type = 0;
+    uint32_t result_len = 0;
+    uint32_t last_len = 0;
+    uint32_t type, len, newlen;
+    result_type = arg->inter(arg, hstackpos, lstackpos);
+    len = result_type>>8;
+    memcpy(hstackpos+len, hstackpos, len*sizeof(double));
+    memcpy(lstackpos+len, lstackpos, len*sizeof(double));
+    last_len = len; result_len = len;
+    arg = arg->next_arg;
+    while (arg) {
+        type = arg->inter(arg, hstackpos+result_len+last_len, lstackpos+result_len+last_len);
+        len = type>>8;
+        if ((type & TYPE_LIST) && !(result_type & TYPE_LIST)) {
+            // If the result is not a list but the operand is, expand the result array
+            for (int i=last_len+len-1; i >= 0; i--) hstackpos[len+i] = hstackpos[result_len+i];
+            for (int i=last_len+len-1; i >= 0; i--) lstackpos[len+i] = lstackpos[result_len+i];
+            for (int i=1; i < len; i++) hstackpos[i] = hstackpos[0];
+            for (int i=1; i < len; i++) lstackpos[i] = lstackpos[0];
+            result_len = len;
+            result_type |= TYPE_LIST;
+        }
+        newlen = result_len;
+        if (!(result_type & TYPE_LIST) || ((type & TYPE_LIST) && (len < result_len))) newlen = len;
+        int i2, i3;
+        double temp;
+        if (cmp & 1) {
+            // less than
+            for (int i=newlen-1; i >= 0; i--) {
+                i2 = result_len+i%last_len;
+                i3 = result_len+last_len+i%len;
+                temp = hstackpos[i2];
+                hstackpos[i2] = hstackpos[i3] - lstackpos[i2];
+                lstackpos[i2] = lstackpos[i3] - temp;
+                if (hstackpos[i2] < hstackpos[i]) hstackpos[i] = hstackpos[i2];
+                if (lstackpos[i2] < lstackpos[i]) lstackpos[i] = lstackpos[i2];
+            }
+        } else {
+            // greater than
+            for (int i=newlen-1; i >= 0; i--) {
+                i2 = result_len+i%last_len;
+                i3 = result_len+last_len+i%len;
+                hstackpos[i2] -= lstackpos[i3];
+                lstackpos[i2] -= hstackpos[i3];
+                if (hstackpos[i2] < hstackpos[i]) hstackpos[i] = hstackpos[i2];
+                if (lstackpos[i2] < lstackpos[i]) lstackpos[i] = lstackpos[i2];
+            }
+        }
+        cmp = cmp >> 2;
+        for (int i=0; i < len; i++) hstackpos[newlen+i] = hstackpos[result_len+last_len+i];
+        for (int i=0; i < len; i++) lstackpos[newlen+i] = lstackpos[result_len+last_len+i];
+        result_len = newlen;
+        last_len = len;
+        arg = arg->next_arg;
+    }
+    return (result_len << 8) | (result_type & TYPE_LIST) | TYPE_BOOLEAN;
+}
+
+
 uint32_t interval_greater(void *f, double *hstackpos, double *lstackpos) {
-    return interval_general_two_args(f, hstackpos, lstackpos, migreater);
+    return interval_general_two_args(f, hstackpos, lstackpos, migt);
 }
 
 void micos(double *hstackpos, double *lstackpos) {
