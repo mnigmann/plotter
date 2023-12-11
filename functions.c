@@ -530,14 +530,8 @@ uint32_t func_index(void *f, double *stackpos) {
     function *arg = fs->first_arg;
     uint32_t t1, t2, l1, l2;
     double *val1, *val2;
-    if (arg->oper) {
-        t1 = arg->oper(arg, stackpos);
-        l1 = t1 >> 8;
-    } else {
-        t1 = ((arg->value_type)&0x40 ? ((variable*)(arg->value))->type : arg->value_type);
-        l1 = t1 >> 8;
-        for (int i=0; i < l1; i++) stackpos[i] = VALUE_LIST(arg, i);
-    }
+    t1 = arg->oper(arg, stackpos);
+    l1 = t1 >> 8;
     val1 = stackpos;
     if (!(t1 & TYPE_LIST)) {
         print_object(t1, val1); printf("\n");
@@ -545,18 +539,12 @@ uint32_t func_index(void *f, double *stackpos) {
     }
     
     arg = arg->next_arg;
-    if (arg->oper) {
-        t2 = arg->oper(arg, stackpos+l1);
-        l2 = t2>>8;
-    } else {
-        t2 = ((arg->value_type)&0x40 ? ((variable*)(arg->value))->type : arg->value_type);
-        l2 = t2>>8;
-        for (int i=0; i < l2; i++) stackpos[l1+i] = VALUE_LIST(arg, i);
-    }
+    t2 = arg->oper(arg, stackpos+l1);
+    l2 = t2>>8;
     val2 = stackpos + l1;
 
     uint8_t step = GET_STEP(t1);
-    //printf("indexing "); print_object(t1, val1); printf(" with "); print_object(t2, val2); printf("\n");
+    //printf("indexing "); print_object(t1, val1); printf(" with (%08x) ", t2); print_object(t2, val2); printf("\n");
     if ((t2 & TYPE_LIST) && ((t2 & TYPE_MASK) == TYPE_DOUBLE)) {
         // List of indices
         int32_t v2;
@@ -871,10 +859,10 @@ uint32_t func_compare_single(void *f, double *stackpos) {
     function *fs = (function*)f;
     function *arg = fs->first_arg;
     uint64_t mp = *((uint64_t*)(fs->value));
-    if (mp == 0) return func_general_two_args(f, stackpos, mgt);
-    if (mp == 1) return func_general_two_args(f, stackpos, mlt);
-    if (mp == 2) return func_general_two_args(f, stackpos, mge);
-    if (mp == 3) return func_general_two_args(f, stackpos, mle);
+    if (mp == 0) return func_general_two_args(f, stackpos, mgt) | TYPE_BOOLEAN;
+    if (mp == 1) return func_general_two_args(f, stackpos, mlt) | TYPE_BOOLEAN;
+    if (mp == 2) return func_general_two_args(f, stackpos, mge) | TYPE_BOOLEAN;
+    if (mp == 3) return func_general_two_args(f, stackpos, mle) | TYPE_BOOLEAN;
     return 0;
 }
 
@@ -900,12 +888,11 @@ uint32_t func_compare(void *f, double *stackpos) {
     uint32_t last_len = 0;
     uint32_t type, len, newlen;
     double result=1, last;
-    printf("comparing %016llx\n", cmp);
     result_type = arg->oper(arg, stackpos);
     len = result_type>>8;
     memcpy(stackpos+len, stackpos, len*sizeof(double));
     last_len = len; result_len = len;
-    printf("initial operand %08x ", result_type); print_object(result_type, stackpos); printf("\n");
+    for (int i=0; i < result_len; i++) stackpos[i] = 1;
     arg = arg->next_arg;
     while (arg) {
         switch (cmp & 3) {
@@ -1267,7 +1254,8 @@ uint32_t func_conditional(void *f, double *stackpos) {
     double *value_ptr = NULL;
     double *result_ptr = NULL;
     double *last_mask_ptr = NULL;
-    uint32_t argtype, lasttype=0, lastlen=0, arglen, st=0, result_type=-1, result_len=-1;
+    uint32_t argtype, lasttype=0, lastlen=0, arglen, st=0, result_type=0, result_len=-1;
+    uint8_t step, result_step = 1;
     //printf("Conditional found at %p, %p\n", fs, arg);
     // After first condition:
     // v- st
@@ -1290,47 +1278,54 @@ uint32_t func_conditional(void *f, double *stackpos) {
     // | result_3 |
 
     while (arg) {
-        if (!last_mask_ptr && !last_mask && ((lasttype & TYPE_MASK) == TYPE_BOOLEAN)) {
-            arg = arg->next_arg;
-            lasttype = TYPE_DOUBLE;
-            continue;
-        }
         argtype = arg->oper(arg, stackpos+st+lastlen);
         arglen = argtype>>8;
-        uint8_t step = GET_STEP(argtype);
+        step = GET_STEP(argtype);
         //printf("evaluating component of conditional: %08x, %08x ", argtype, result_type); print_object(argtype, stackpos+st+lastlen); printf("\n");
         // In this case, result_len refers to the number of elements in the list,
         // not the number of doubles the list takes up
+
+        // If the result length and type have not been set, set them
+        if (result_len == -1) {
+            result_len = arglen;
+        }
+        // If the existing data is not a list, then we may need to expand it
+        else if ((argtype & TYPE_LIST) && !(result_type & TYPE_LIST)) {
+            // If this array is the first condition or if its length is equal to the existing length,
+            // then it is not necessary to expand the existing data
+            if (st) {
+                // Overall mask and result arrays have already been established
+                // Copy the boolean array
+                for (int i=arglen-1; i >= 0; i--) stackpos[st*arglen+i] = stackpos[st+i];
+                last_mask_ptr = stackpos + st*arglen;
+                // Expand the value data. We can't use memcpy here because if arglen=2 and the result
+                // is a point then the point at the lowest index will overlap its destination.
+                for (int i=arglen*GET_STEP(result_type)-1; i >= 0; i--) stackpos[arglen+i] = stackpos[1+i%result_step];
+                result_ptr = stackpos+arglen;
+                st = st*arglen;
+            } else if (last_mask_ptr) {
+                // First condition has been evaluated, but the first condition is a scalar
+                // and the first value is an array.
+                // Copy the value
+                for (int i=arglen-1; i >= 0; i--) stackpos[i+arglen] = stackpos[i+1];
+                lastlen = arglen;
+            }
+            // Expand the (initial) mask
+            for (int i=1; i < arglen; i++) stackpos[i] = stackpos[0];
+            result_type |= TYPE_LIST;
+            result_len = arglen;
+        }
         if (argtype & TYPE_LIST) result_len = (arglen/step < result_len ? arglen/step : result_len);
         if ((argtype & TYPE_MASK) == TYPE_BOOLEAN) {
-            if (argtype & TYPE_LIST) {
-                // The current mask is stored to stackpos+st. If the next expression
-                // is a double, then the mask is moved to make room for the combined
-                // mask list.
-                last_mask_ptr = stackpos+st;
-                lastlen = arglen;
-                result_len = lastlen;
-                //printf("    last_mask_ptr %p (%ld)\n", last_mask_ptr, last_mask_ptr - stackpos);
-            } else {
-                last_mask = stackpos[0];
-                last_mask_ptr = NULL;
-            }
+            // Condition was found. Thus, the previous expression was a double and lastlen will be zero.
+            last_mask_ptr = stackpos+st;
+            lastlen = arglen;
+            //printf("    last_mask_ptr %p (%ld)\n", last_mask_ptr, last_mask_ptr - stackpos);
         } else {
-            if (!last_mask_ptr) {
-                if (((lasttype & TYPE_MASK) != TYPE_BOOLEAN) || (last_mask)) {
-                    // Default expression
-                    for (int i=0; i < arglen; i++) stackpos[i] = stackpos[st+lastlen+i]*SIGN_BIT(fs);
-                    if (fs->value) ((function*)(fs->value))->oper(fs->value, stackpos);
-                    return argtype;
-                }
-                lastlen = 0;
-                lasttype = argtype;
-                arg = arg->next_arg;
-                continue;
-            }
-            if (result_type == -1) result_type = argtype | (lasttype & TYPE_LIST);
-            else if ((result_type & TYPE_MASK) != (argtype & TYPE_MASK)) FAIL("ERROR: all branches of a conditional must have the same type\n");
+            // For the first value, set result_type
+            if ((st) && ((result_type & TYPE_MASK) != (argtype & TYPE_MASK))) FAIL("ERROR: all branches of a conditional must have the same type\n");
             result_type |= argtype;
+            result_step = GET_STEP(result_type);
             value_ptr = stackpos+st+lastlen;
             if (!(argtype & TYPE_LIST)) {
                 //printf("casting, value at %p, result_len %d, step %d\n", value_ptr, result_len, step);
@@ -1350,8 +1345,8 @@ uint32_t func_conditional(void *f, double *stackpos) {
                 value_ptr = stackpos+lastlen;
                 st = lastlen + step*lastlen;
                 last_mask_ptr = stackpos+st;
-                memcpy(stackpos+st, stackpos, lastlen*sizeof(double));
-                for (int i=0; i < lastlen; i++) stackpos[i] = 0;
+                memcpy(stackpos+st, stackpos, result_len*sizeof(double));
+                for (int i=0; i < result_len; i++) stackpos[i] = 0;
                 // | mask | result_1 | mask_1
                 //        ^- result_ptr
                 //        ^- value_ptr
@@ -1362,7 +1357,8 @@ uint32_t func_conditional(void *f, double *stackpos) {
             if ((lasttype & TYPE_MASK) != TYPE_BOOLEAN) {
                 // Default expression
                 last_mask_ptr = stackpos+st+lastlen+result_len*step;
-                for (int i=0; i < result_len; i++) last_mask_ptr[i] = 1-stackpos[i];
+                for (int i=0; i < result_len; i++) last_mask_ptr[i] = (stackpos[i] != 0 ? 0 : 1);
+                lastlen = result_len;
                 //printf("    For default expression, using "); print_object(result_len<<8, last_mask_ptr); printf("\n");
             }
             if (last_mask_ptr) {
@@ -1370,19 +1366,20 @@ uint32_t func_conditional(void *f, double *stackpos) {
                 // list of booleans
                 if (value_ptr == result_ptr) {
                     for (int i=0; i < result_len; i++) {
-                        if (!(last_mask_ptr[i])) {
+                        if (!(last_mask_ptr[i%lastlen])) {
                             for (int j=0; j < step; j++) result_ptr[i*step+j] = NAN;
                         }
                     }
                 } else {
                     for (int i=0; i < result_len; i++) {
-                        if (last_mask_ptr[i] && !stackpos[i]) {
+                        if (last_mask_ptr[i%lastlen] && !stackpos[i]) {
                             //printf("    copying for index %d\n", i);
                             memcpy(result_ptr+i*step, value_ptr+i*step, step*sizeof(double));
                         }
                     }
                 }
-                for (int i=0; i < result_len; i++) stackpos[i] += last_mask_ptr[i];
+                // Update the combined mask
+                for (int i=0; i < result_len; i++) stackpos[i] += last_mask_ptr[i%lastlen];
             }
             lastlen = 0;
             // Break if a default expression was found
@@ -1451,6 +1448,45 @@ uint32_t func_sort(void *f, double *stackpos) {
         for (int i=0; i < (argtype>>8); i++) stackpos[i] *= SIGN_BIT(fs);
         return argtype;
     }
+}
+
+int compare_generic_indirect(void *data_v, const void *a, const void *b) {
+    void **data_s = (void**)(data_v);
+    uint8_t step = *((uint8_t*)(data_s[0]));
+    double *data = (double*)(data_s[1]);
+    double *arg1 = data + (step*(int)(*((double*)a)));
+    double *arg2 = data + (step*(int)(*((double*)b)));
+    for (int i=0; i < step; i++) {
+        if (arg1[i] > arg2[i]) return 1;
+        if (arg1[i] < arg2[i]) return -1;
+    }
+    return 0;
+}
+
+uint32_t func_unique(void *f, double *stackpos) {
+    function *fs = (function*)f;
+    function *arg = fs->first_arg;
+    uint32_t argtype = arg->oper(arg, stackpos);
+    uint32_t arglen = argtype>>8;
+    uint8_t step = GET_STEP(argtype);
+    uint32_t n = arglen / step;
+    for (int i=0; i < n; i++) stackpos[arglen+i] = i;
+    void *data[2] = {&step, stackpos};
+    qsort_r(stackpos+arglen, n, sizeof(double), data, compare_generic_indirect);
+    int j=arglen+1;
+    for (int i=1; i < n; i++) {
+        //print_object(256 | TYPE_POINT, stackpos+step*(int)stackpos[j-1]); printf(", "); print_object(256 | TYPE_POINT, stackpos+step*(int)stackpos[arglen+i]); printf("\n");
+        if (memcmp(stackpos+step*(int)stackpos[j-1], stackpos+step*(int)stackpos[arglen+i], step*sizeof(double))) {
+            stackpos[j] = stackpos[arglen+i];
+            j++;
+        }
+    }
+    j -= arglen;
+    qsort(stackpos+arglen, j, sizeof(double), compare_doubles);
+    for (int i=0; i < j; i++) {
+        if (i < stackpos[arglen+i]) memcpy(stackpos+i*step, stackpos+step*(int)stackpos[arglen+i], step*sizeof(double));
+    }
+    return ((j*step)<<8) | (argtype & 0xff);
 }
 
 uint32_t func_join(void *f, double *stackpos) {
@@ -1642,7 +1678,7 @@ uint32_t func_convert_polar(void *f, double *stackpos) {
 }
 
 
-#define N_OPERATORS 42
+#define N_OPERATORS 43
 const oper_data oper_list[N_OPERATORS] = {
     {func_value, "func_value", interval_value},
 
@@ -1686,6 +1722,7 @@ const oper_data oper_list[N_OPERATORS] = {
     {func_distance, "func_distance", NULL},
     {func_conditional, "func_conditional", NULL},
     {func_sort, "func_sort", NULL},
+    {func_unique, "func_unique", NULL},
     {func_join, "func_join", NULL},
     {func_length, "func_length", NULL},
     {func_integrate, "func_integrate", NULL},

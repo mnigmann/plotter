@@ -20,11 +20,14 @@
 
 #define CLIP_WIDTH(v) (v<0 ? 0 : (v>WIDTH ? WIDTH : v))
 #define CLIP_HEIGHT(v) (v<0 ? 0 : (v>HEIGHT ? HEIGHT : v))
-#define IN_BOUNDS(x, y) ((window_x0 <= x) && (x <= window_x1) && (window_y0 <= y) && (y <= window_y1))
+#define IN_BOUNDS(x, y) ((window_x0 <= x) && (x <= window_x1) && (window_y0 <= y) && (y <= window_y1) && (x == x) && (y == y))
 #define SET_COLOR(cr, color) cairo_set_source_rgb(cr, color[0]/256.0, color[1]/256.0, color[2]/256.0)
 #define SET_COLOR_OPACITY(cr, color, opacity) cairo_set_source_rgba(cr, color[0]/256.0, color[1]/256.0, color[2]/256.0, opacity)
 
 #define TOIDX(x, y) (3*(x + y*WIDTH))
+
+#define GET_STEP(type) (step_table[(type) & TYPE_MASK])
+const static uint32_t step_table[8] = {1, 2, 3, 1, 1, MAX_POLYGON_SIZE*2, 0, 0};
 
 guchar data[3*WIDTH*HEIGHT];
 GdkPixbuf *pixbuf;
@@ -38,7 +41,7 @@ uint16_t nfev = 0;
 uint16_t niev = 0;
 
 function function_list[2048];
-variable variable_list[128];
+variable variable_list[512];
 expression expression_list[100];
 expression *deptable[300];
 double stack[65536];
@@ -58,18 +61,17 @@ double click_y;
 int ticker_target, ticker_step;
 uint8_t run_ticker;
 
-cairo_matrix_t transform_matrix;
-
+uint32_t eval_index = 0;
 
 uint32_t eval_func(double t, double *x, double *y, function *func, double *stackpos) {
     variable_list[0].pointer = &t;
     variable_list[0].type = 1<<8;
     uint32_t type = func->oper(func, stackpos);
     if ((type & TYPE_MASK) == TYPE_POINT) {
-        *x = stackpos[0];
-        *y = stackpos[1];
+        *x = stackpos[2*eval_index];
+        *y = stackpos[2*eval_index+1];
     } else {
-        *y = stackpos[0];
+        *y = stackpos[eval_index];
         *x = t;
     }
     nfev++;
@@ -168,82 +170,6 @@ void est_radius(double x0, double y0, double x1, double y1, double x2, double y2
     *speed = sqrt(d01);
 }
 
-/*void draw_function(function *func, double *stackpos, uint8_t *color) {
-    double x, y, xp, yp, xpp, ypp, radius, speed, dt, newdt;
-    clock_t t1, t2;
-    t1 = clock();
-    double t = window_x0;
-    nfev = 0;
-    eval_func(t, &xpp, &ypp, func, stackpos);
-    eval_func(t+DT_DERIV, &xp, &yp, func, stackpos);
-    eval_func(t+DT_DERIV*2, &x, &y, func, stackpos);
-    est_radius(xpp, ypp, xp, yp, x, y, &radius, &speed);
-    dt = fmin(RADIUS_SCALE * radius, MAX_ARC_LENGTH*DT_DERIV / speed);
-    eval_func(t+dt, &xp, &yp, func, stackpos);
-    
-    t = t + dt;
-    //draw_line(SCALE_X(xpp), SCALE_Y(ypp), SCALE_X(xp), SCALE_Y(yp));
-    LineAA((uint8_t*)data, WIDTH, HEIGHT, SCALE_XK(xpp), SCALE_YK(ypp), SCALE_XK(xp), SCALE_YK(yp), color);
-    double minstep_x = (window_x1 - window_x0)/WIDTH;
-    double minstep_y = (window_y1 - window_y0)/HEIGHT;
-    while (t < window_x1) {
-        if (dt < minstep_x) dt = minstep_x;
-        eval_func(t+dt, &x, &y, func, stackpos);
-        //if (fabs(250*250*((x-xp)*(yp-ypp) - (xp-xpp)*(y-yp))) > 10) {
-        //    printf("retrying\n");
-        //    dt = dt/2;
-        //    continue;
-        //}
-        t = t + dt;
-        //draw_line(SCALE_X(xp), SCALE_Y(yp), SCALE_X(x), SCALE_Y(y));
-        LineAA((uint8_t*)data, WIDTH, HEIGHT, SCALE_XK(xp), SCALE_YK(yp), SCALE_XK(x), SCALE_YK(y), color);
-        //est_radius(x, y, xp, yp, xpp, ypp, &radius, &speed);
-        est_radius(SCALE_XK(x), SCALE_YK(y), SCALE_XK(xp), SCALE_YK(yp), SCALE_XK(xpp), SCALE_YK(ypp), &radius, &speed);
-        radius = radius/(1<<16); speed = speed/(1<<16);
-        dt = fmin(RADIUS_SCALE * radius, MAX_ARC_LENGTH * dt / speed);
-        printf("t: %f -> (%f, %f), radius: %f, arc: %f, dt: %f, det: %f\n", t, x, y, radius, speed, dt, 250*250*((x-xp)*(yp-ypp) - (xp-xpp)*(y-yp)));
-        xpp = xp; ypp = yp; xp = x; yp = y;
-    }
-
-    t2 = clock();
-    g_print("Drawing took %lu, nfev: %d\n", t2-t1, nfev);
-}*/
-
-void draw_function_slow(function *func, double *stackpos, uint8_t *color, cairo_t *cr) {
-    SET_COLOR(cr, color);
-    double x, y, xp, yp, dt, t, t_end;
-    if ((eval_func(window_x0, &xp, &yp, func, stackpos) & TYPE_MASK) == TYPE_POINT) {
-        t = 0;
-        nfev = 0;
-        printf("Parametric function detected\n");
-        eval_func(0, &xp, &yp, func, stackpos);
-        cairo_move_to(cr, SCALE_XK(xp), SCALE_YK(yp));
-        eval_func(PLOT_DT_DERIV, &x, &y, func, stackpos);
-        dt = PLOT_MAX_ARC_LENGTH*PLOT_DT_DERIV/hypot((x-xp)*xscale, (y-yp)*yscale);
-        printf("Initial point (%f, %f), dt is %f\n", xp, yp, dt);
-        t += dt;
-        while (t < 1) {
-            eval_func(t, &x, &y, func, stackpos);
-            cairo_line_to(cr, SCALE_XK(x), SCALE_YK(y));
-            dt = PLOT_MAX_ARC_LENGTH*dt/hypot((x-xp)*xscale, (y-yp)*yscale);
-            t += dt;
-            xp = x; yp = y;
-        }
-        printf("Parametric evaluation done in %d steps\n", nfev);
-        cairo_stroke(cr);
-        return;
-    }
-    cairo_move_to(cr, SCALE_XK(xp), SCALE_YK(yp));
-    double minstep_x = (window_x1 - window_x0)/WIDTH;
-    for (t = window_x0+minstep_x; t < window_x1; t+=minstep_x) {
-        eval_func(t, &x, &y, func, stackpos);
-        if ((x+1 > x) && (y+1 > y) && (xp+1 > xp) && (yp+1 > yp) && (IN_BOUNDS(x, y) || IN_BOUNDS(xp, yp))) cairo_line_to(cr, SCALE_XK(x), SCALE_YK(y));
-        else if ((x+1 > x) && (y+1 > y)) cairo_move_to(cr, SCALE_XK(x), SCALE_YK(y));
-        xp = x; yp = y;
-    }
-    cairo_stroke(cr);
-}
-
 void find_extremum(function *func, double *stackpos, double x, double y, double xp, double yp, double xpp, double ypp) {
     double u1, v1, u2, v2, ex, temp, val, m1, m2;
     // We assume that x > xp > xpp
@@ -305,7 +231,7 @@ void find_discontinuity(function *func, double *stackpos, double t, double x, do
 
 void draw_function_constant_ds_rec(function *func, file_data *fd, cairo_t *cr, uint8_t flags, double t_start, double t_end, double xi, double yi, double min_dt) {
     double x, y, xp, yp, xpp, ypp, tp, tpp, dt, ds, dsp;
-    //printf("t_end %f, t_start %f, min_dt %f\n", t_end, t_start, min_dt);
+    //printf("t_end %f, t_start %f, min_dt %f, flags %02x, interval %p\n", t_end, t_start, min_dt, flags, func->inter);
     if (t_end - t_start < min_dt) {
         //printf("Returning due to minimum dt\n");
         return;
@@ -330,22 +256,24 @@ void draw_function_constant_ds_rec(function *func, file_data *fd, cairo_t *cr, u
         uint32_t step = 0;
         while (t_start < t_end) {
             eval_func(t_start, &x, &y, func, stackpos);
-            ds = hypot((x-xp)*xscale, (y-yp)*yscale);
-            dt = PLOT_MAX_ARC_LENGTH*dt/ds;
-            /*if ((yp > ypp) && (yp > y) && (step >= 2)) {
-                printf("Possible maximum at %f -> (%f, %f)\n", tp, xp, yp);
-                find_extremum(func, stackpos, t_start, y, tp, xp, tpp, ypp);
-            } else if ((yp < ypp) && (yp < y) && (step >= 2)) {
-                printf("Possible minimum at %f -> (%f, %f)\n", tp, xp, yp);
-            }*/
-            if (ds > PLOT_MAX_ARC_LENGTH*PLOT_DISCONTINUITY_THRESHOLD) {
-                //printf("Possible discontinuity between %f and %f: (%f, %f) and (%f, %f)\n", t_start, tp, x, y, xp, yp);
-                find_discontinuity(func, stackpos, t_start, x, y, tp, xp, yp, cr);
+            if ((x == x) && (y == y)) {
+                ds = hypot((x-xp)*xscale, (y-yp)*yscale);
+                dt = PLOT_MAX_ARC_LENGTH*dt/ds;
+                /*if ((yp > ypp) && (yp > y) && (step >= 2)) {
+                    printf("Possible maximum at %f -> (%f, %f)\n", tp, xp, yp);
+                    find_extremum(func, stackpos, t_start, y, tp, xp, tpp, ypp);
+                } else if ((yp < ypp) && (yp < y) && (step >= 2)) {
+                    printf("Possible minimum at %f -> (%f, %f)\n", tp, xp, yp);
+                }*/
+                if (ds > PLOT_MAX_ARC_LENGTH*PLOT_DISCONTINUITY_THRESHOLD) {
+                    //printf("Possible discontinuity between %f and %f: (%f, %f) and (%f, %f)\n", t_start, tp, x, y, xp, yp);
+                    find_discontinuity(func, stackpos, t_start, x, y, tp, xp, yp, cr);
+                }
+                cairo_line_to(cr, SCALE_XK(x), SCALE_YK(y));
+                step++;
+                xpp = xp; ypp = yp; xp = x; yp = y; tpp = tp; tp = t_start; dsp = ds;
+                t_start += dt;
             }
-            cairo_line_to(cr, SCALE_XK(x), SCALE_YK(y));
-            step++;
-            xpp = xp; ypp = yp; xp = x; yp = y; tpp = tp; tp = t_start; dsp = ds;
-            t_start += dt;
             if (!IN_BOUNDS(x, y)) {
                 // Leaving the bounds, so iterate on [t, t_end]
                 cairo_stroke(cr);
@@ -369,15 +297,17 @@ void draw_function_constant_ds_rec(function *func, file_data *fd, cairo_t *cr, u
         t_end -= dt;
         while (t_end > t_start) {
             eval_func(t_end, &x, &y, func, stackpos);
-            ds = hypot((x-xp)*xscale, (y-yp)*yscale);
-            dt = PLOT_MAX_ARC_LENGTH*dt/ds;
-            if (ds > PLOT_MAX_ARC_LENGTH*PLOT_DISCONTINUITY_THRESHOLD) {
-                //printf("Possible discontinuity between %f and %f: (%f, %f) and (%f, %f)\n", t_end, tp, x, y, xp, yp);
-                find_discontinuity(func, stackpos, t_end, x, y, tp, xp, yp, cr);
+            if ((x == x) && (y == y)) {
+                ds = hypot((x-xp)*xscale, (y-yp)*yscale);
+                dt = PLOT_MAX_ARC_LENGTH*dt/ds;
+                if (ds > PLOT_MAX_ARC_LENGTH*PLOT_DISCONTINUITY_THRESHOLD) {
+                    //printf("Possible discontinuity between %f and %f: (%f, %f) and (%f, %f)\n", t_end, tp, x, y, xp, yp);
+                    find_discontinuity(func, stackpos, t_end, x, y, tp, xp, yp, cr);
+                }
+                cairo_line_to(cr, SCALE_XK(x), SCALE_YK(y));
+                xp = x; yp = y; tp = t_end; dsp = ds;
+                t_end -= dt;
             }
-            cairo_line_to(cr, SCALE_XK(x), SCALE_YK(y));
-            xp = x; yp = y; tp = t_end; dsp = ds;
-            t_end -= dt;
             if (!IN_BOUNDS(x, y)) {
                 // Leaving the bounds, so iterate on [t, t_end]
                 cairo_stroke(cr);
@@ -430,19 +360,27 @@ void draw_function_constant_ds(function *func, file_data *fd, uint8_t *color, ca
     t = 0;
     t_end = 1;
     double min_dt = PLOT_MIN_DT;
-    if ((eval_func(0, &xp, &yp, func, stackpos) & TYPE_MASK) != TYPE_POINT) {
+    uint32_t type = eval_func(0, &xp, &yp, func, stackpos);
+    if ((type & TYPE_MASK) != TYPE_POINT) {
         t = window_x0;
         t_end = window_x1;
         min_dt = PLOT_MAX_ARC_LENGTH/xscale;
     }
     nfev = 0;
     niev = 0;
-    uint8_t flags = 0;
-    eval_func(t, &xp, &yp, func, stackpos);
-    if (IN_BOUNDS(xp, yp)) flags |= 0x01;
-    eval_func(t_end, &x, &y, func, stackpos);
-    if (IN_BOUNDS(x, y)) flags |= 0x02;
-    draw_function_constant_ds_rec(func, fd, cr, flags, t, t_end, xp, yp, min_dt);
+    uint8_t flags;
+    uint32_t n = (type>>8)/GET_STEP(type);
+    //printf("Number of functions to be plotted: %d\n", n);
+    for (uint32_t i=0; i < n; i++) {
+        flags = 0;
+        eval_index = i;
+        eval_func(t, &xp, &yp, func, stackpos);
+        if (IN_BOUNDS(xp, yp)) flags |= 0x01;
+        eval_func(t_end, &x, &y, func, stackpos);
+        if (IN_BOUNDS(x, y)) flags |= 0x02;
+        //printf("Initial values: (%f, %f) and (%f, %f), flags %02x\n", x, y, xp, yp, flags);
+        draw_function_constant_ds_rec(func, fd, cr, flags, t, t_end, xp, yp, min_dt);
+    }
 }
 
 void draw_implicit_rec(expression *expr, file_data *fd, cairo_t *cr, uint8_t *color, double *area, int divisions) {
@@ -1077,7 +1015,6 @@ int main (int argc, char **argv) {
     uint32_t n_var = 0;
     load_file(argv[1], &fd);
     top_expr = parse_file(&fd, stringbuf);
-    expression_list[18].flags |= EXPRESSION_PLOTTABLE;
     printf("Parsing completed. %d function blocks, %d variables, %d expressions\n", fd.n_func, fd.n_var, fd.n_expr);
     ticker_target = (int)parse_double(argv[2]);
     ticker_step = (int)parse_double(argv[3]);

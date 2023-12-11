@@ -9,14 +9,16 @@
 #include <math.h>
 #include <time.h>
 
-#define N_FUNCTIONS 16
+#define N_FUNCTIONS 17
 const char *function_names[N_FUNCTIONS] = {
     "arctan",       "cos",          "sin",          "mod",          "floor",        "polygon",      "total",        "distance",
-    "rgb",          "max",          "abs",          "sort",         "join",         "length",       "solve",        "eigvals"
+    "rgb",          "max",          "abs",          "sort",         "join",         "length",       "solve",        "eigvals",
+    "unique"
 };
 uint32_t (*function_pointers[N_FUNCTIONS])(void*, double*) = {
     func_arctan,    func_cosine,    func_sine,      func_mod,       func_floor,     func_polygon,   func_total,     func_distance,
-    func_rgb,       func_max,       func_abs,       func_sort,      func_join,      func_length,    func_solve,     func_eigvals
+    func_rgb,       func_max,       func_abs,       func_sort,      func_join,      func_length,    func_solve,     func_eigvals,
+    func_unique
 };
 
 int extract_braces(char* latex, int start) {
@@ -573,14 +575,14 @@ int parse_latex_rec(char *latex, int end, function *function_list, double *stack
             arg1_start = arg2_start;
             arg2_start = i+1;
             cmp_type |= (1 << (2*num_cmp));
-        } else if ((strcmp(latex+i, "\\le") == 0) && (n_leftright == 0) && (n_braces == 0)) {
-            arg1_start = arg2_start;
-            arg2_start = i+3;
-            cmp_type |= (2 << (2*num_cmp));
-        } else if ((strcmp(latex+i, "\\ge") == 0) && (n_leftright == 0) && (n_braces == 0)) {
+        } else if ((strncmp(latex+i, "\\le", 3) == 0) && (n_leftright == 0) && (n_braces == 0)) {
             arg1_start = arg2_start;
             arg2_start = i+3;
             cmp_type |= (3 << (2*num_cmp));
+        } else if ((strncmp(latex+i, "\\ge", 3) == 0) && (n_leftright == 0) && (n_braces == 0)) {
+            arg1_start = arg2_start;
+            arg2_start = i+3;
+            cmp_type |= (2 << (2*num_cmp));
         } else arg1_start = -1;
         if (arg1_start >= 0) {
             if (num_cmp == 0) {
@@ -1074,6 +1076,7 @@ int parse_latex_rec(char *latex, int end, function *function_list, double *stack
                             printf(" with value expression %.*s\n", j-subscript-1, latex+subscript+1);
                             j++;
                         }
+                        int new_var_size = *var_size;
                        
                         // Parse the main expression
                         uint32_t last_term = func_pos;
@@ -1081,7 +1084,7 @@ int parse_latex_rec(char *latex, int end, function *function_list, double *stack
 
                         // Parse the definitions of the variables
                         // Clear the variables and take them out of scope
-                        for (j=old_var_size; j < *var_size; j++) {
+                        for (j=old_var_size; j < new_var_size; j++) {
                             printf("recursing on %p %.*s\n", variable_list[j].pointer, variable_list[j].type, (char*)(variable_list[j].pointer));
                             function_list[last_term].next_arg = function_list+func_pos;
                             last_term = func_pos;
@@ -1129,9 +1132,23 @@ int parse_latex_rec(char *latex, int end, function *function_list, double *stack
                 }
                 arg1_end = 0;
                 arg2_end = 0;
+            } else if ((cmd_len == 4) && (strncmp(latex+cmd_start, "left|", cmd_len+1) == 0)) {
+                latex[i+5] = 0;
+                arg1_end = get_next_match(latex, i, end, '|')-6;
+                latex[i+5] = '|';
+                printf("Found absolute value %.*s\n", arg1_end-i-6, latex+i+6);
+                func_pos = insert_product_term(function_list, last_pos, func_pos);
+                last_pos = func_pos;
+                function_list[func_pos] = new_function(func_abs, NULL, function_list+func_pos+1);
+                func_pos++;
+                func_pos += PARSE_LATEX_REC(latex+i+6, arg1_end-i-6, function_list+func_pos);
+                i = arg1_end+6;
+                arg1_end = 0;
+                arg2_end = 0;
             } else if ((cmd_len == 4) && (strncmp(latex+cmd_start, "left\\{", cmd_len+2) == 0)) {
                 arg1_end = extract_braces(latex, cmd_start+5);
                 printf("Found conditional from %d to %d: %.*s\n", cmd_start+6, arg1_end-7, arg1_end-cmd_start-13, latex+cmd_start+6);
+                func_pos = insert_product_term(function_list, last_pos, func_pos);
                 last_pos = func_pos;
                 function_list[func_pos] = new_function(func_conditional, NULL, function_list+func_pos+1);
                 func_pos++;
@@ -1446,6 +1463,23 @@ void insert_interval_functions(function *func) {
     function *arg = func->first_arg;
     while (arg) {
         insert_interval_functions(arg);
+        if (!(arg->inter)) {
+            func->inter = NULL;
+            return;
+        }
+        arg = arg->next_arg;
+    }
+}
+
+void validate_interval_functions(function *func) {
+    if ((func->oper == func_user_defined) && !(((function*)(func->value))->inter)) {
+        printf("Function block %p references function %s without interval function\n", func, ((variable*)(((function*)(func->value))->next_arg))->name);
+        func->inter = NULL;
+        return;
+    }
+    function *arg = func->first_arg;
+    while (arg) {
+        validate_interval_functions(arg);
         if (!(arg->inter)) {
             func->inter = NULL;
             return;
@@ -1830,6 +1864,7 @@ expression *parse_file(file_data *fd, char *stringbuf) {
         printf("expression pointer at %p, function %p, variable %p, flags %02x, begin %d, dep %p, num %d\n", expression_list+i, expression_list[i].func, expression_list[i].var, expression_list[i].flags, expression_list[i].expr_begin, expression_list[i].dependencies, expression_list[i].num_dependencies);
         insert_interval_functions(expression_list[i].func);
     }
+    for (i=0; i < n_expr; i++) validate_interval_functions(expression_list[i].func);
     
     // Print the function table
     char *opername;
@@ -1897,6 +1932,8 @@ expression *parse_file(file_data *fd, char *stringbuf) {
     for (i=0; variable_list+i < varpos; i++)
         printf("%s variable pointer at %p, points to %p, type %08X, flags %02X, new_pointer %p\n", variable_list[i].name, variable_list+i, variable_list[i].pointer, variable_list[i].type, variable_list[i].flags, variable_list[i].new_pointer);
     
+    printf("%ld variables, %d expressions\n", (varpos-variable_list), n_expr);
+
     // Evaluate all variables in accordance with the topological ordering
     printf("stack_size is %d\n", stack_size);
     for (int p=0; p < stack_size; p++) {

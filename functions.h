@@ -61,6 +61,7 @@ uint32_t func_total(void *f, double *stackpos);
 uint32_t func_distance(void *f, double *stackpos);
 uint32_t func_conditional(void *f, double *stackpos);
 uint32_t func_sort(void *f, double *stackpos);
+uint32_t func_unique(void *f, double *stackpos);
 uint32_t func_join(void *f, double *stackpos);
 uint32_t func_length(void *f, double *stackpos);
 
