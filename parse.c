@@ -823,6 +823,13 @@ int parse_latex_rec(char *latex, int end, function *function_list, double *stack
                 arg1_end -= 6;
                 arg1_start = cmd_end + 6;
                 oper = func_sine;
+            } else if ((cmd_len == 3) && (strncmp(latex+cmd_start, "tan", cmd_len)==0)) {
+                arg1_end = extract_parenthetical(latex, cmd_end);
+                printf("multiply tangent %.*s\n", arg1_end - cmd_end - 12, latex+cmd_end+6);
+                i = arg1_end;
+                arg1_end -= 6;
+                arg1_start = cmd_end + 6;
+                oper = func_tangent;
             } else if ((cmd_len == 3) && (strncmp(latex+cmd_start, "det", cmd_len)==0)) {
                 arg1_end = extract_parenthetical(latex, cmd_end);
                 printf("multiply det %.*s\n", arg1_end - cmd_end - 12, latex+cmd_end+6);
@@ -910,7 +917,7 @@ int parse_latex_rec(char *latex, int end, function *function_list, double *stack
                 printf("Initial value is %.*s\n", subscript-i-2, latex+i+2);
                 printf("Final value is %.*s\n", superscript-subscript-3, latex+subscript+3);
                 last_pos = func_pos;
-                function_list[func_pos] = new_function(func_integrate, NULL, function_list+func_pos+1);
+                function_list[func_pos] = new_function(func_integrate_gsl, NULL, function_list+func_pos+1);
                 func_pos++;
                 // Value block for the variable of intgration
                 function_list[func_pos] = new_value(NULL, 0x40, function_list+func_pos+1);
@@ -1488,6 +1495,18 @@ void validate_interval_functions(function *func) {
     }
 }
 
+uint8_t check_fixed(function *func) {
+    if ((func->oper == func_value) && (func->value_type & 0x40)) return ((variable*)(func->value))->flags & VARIABLE_XYLIKE;
+
+    function *arg = func->first_arg;
+    uint8_t result = 0;
+    while (arg) {
+        result |= check_fixed(arg);
+        arg = arg->next_arg;
+    }
+    return result;
+}
+
 void load_file(char *fname, file_data *fd) {
     expression *expression_list = fd->expression_list;
     FILE *fp = fopen(fname, "r");
@@ -1643,6 +1662,7 @@ expression *parse_file(file_data *fd, char *stringbuf) {
     // Pointer to any new variable created as the input to a particular expression.
     // For example, u in w=10^{u}
     variable *local_variable = NULL;
+    variable *tempvar;
     for (uint32_t expr_idx=0; expr_idx < n_expr; expr_idx++) {
         line = expression_list[expr_idx].def;
         read = strlen(line);
@@ -1790,11 +1810,29 @@ expression *parse_file(file_data *fd, char *stringbuf) {
                     break;
                 }
                 if (function_list[p].oper == func_value) {
+                    // If the variable was created during parsing and is x-like, replace with x
+                    tempvar = ((variable*)(function_list[p].value));
+                    if ((tempvar >= varpos) && (tempvar->flags & VARIABLE_XLIKE)) {
+                        tempvar->flags &= ~VARIABLE_IN_SCOPE;
+                        function_list[p].value = (void*)(variable_list);
+                    }
+                    // If the variable was created during parsing and is y-like, replace with y
+                    if ((tempvar >= varpos) && (tempvar->flags & VARIABLE_YLIKE)) {
+                        tempvar->flags &= ~VARIABLE_IN_SCOPE;
+                        function_list[p].value = (void*)(variable_list+1);
+                    }
+
+                    // Reassign theta to x
                     if (function_list[p].value == variable_list+3) function_list[p].value = (void*)(variable_list);
                     if (function_list[p].value == variable_list) has_xy |= 0x01;
                     else if (function_list[p].value == variable_list+1) has_xy |= 0x02;
                 }
             }
+            // If the expression has a variable and it depends on x or y, update
+            // the VARIABLE_XLIKE and VARIABLE_YLIKE bits. These will later be used
+            // to determine the plottability of the expression.
+            if ((exprpos->var) && (has_xy & 0x01)) exprpos->var->flags |= VARIABLE_XLIKE;
+            if ((exprpos->var) && (has_xy & 0x02)) exprpos->var->flags |= VARIABLE_YLIKE;
             if (has_xy) {
                 // The expression can only be plotted if either x or y is not present
                 // or the equation is implicit
@@ -1831,12 +1869,6 @@ expression *parse_file(file_data *fd, char *stringbuf) {
             }
             varpos = var_size + variable_list;
             stringpos = stringbuf + string_size;
-            if ((var_size > 0) && (variable_list[var_size-1].flags & VARIABLE_XYLIKE) && (variable_list[var_size-1].flags & VARIABLE_IN_SCOPE)) {
-                // If the parser has created a new x or y-like variable, classify the expression as plottable and not fixed
-                variable_list[var_size-1].flags &= ~VARIABLE_IN_SCOPE;
-                exprpos->flags &= ~EXPRESSION_FIXED;
-                exprpos->flags |= EXPRESSION_PLOTTABLE;
-            }
         }
         
         if (local_variable) local_variable->flags &= (~VARIABLE_IN_SCOPE);
@@ -1850,12 +1882,9 @@ expression *parse_file(file_data *fd, char *stringbuf) {
         if (function_list[i].oper == func_user_defined) {
             function_list[i].value = ((variable*)(function_list[i].value))->pointer;
         }
-        if (function_list[i].value_type & 0x40) {
-            if (((variable*)(function_list[i].value))->flags & VARIABLE_XLIKE) {
-                printf("function block %p used to point to %s (%p), now points to x (%p)\n", function_list+i, ((variable*)(function_list[i].value))->name, function_list[i].value, variable_list);
-                function_list[i].value = (void*)variable_list;
-            }
-            else if (((variable*)(function_list[i].value))->flags & VARIABLE_YLIKE) function_list[i].value = (void*)(variable_list+1);
+        if (function_list[i].oper == func_integrate_gsl) {
+            function_list[i].value = malloc(sizeof(integration_result));
+            printf("assigning %p to function %p (%d)\n", function_list[i].value, function_list+i, i);
         }
     }
 
@@ -1864,6 +1893,7 @@ expression *parse_file(file_data *fd, char *stringbuf) {
         printf("expression pointer at %p, function %p, variable %p, flags %02x, begin %d, dep %p, num %d\n", expression_list+i, expression_list[i].func, expression_list[i].var, expression_list[i].flags, expression_list[i].expr_begin, expression_list[i].dependencies, expression_list[i].num_dependencies);
         insert_interval_functions(expression_list[i].func);
     }
+    // Validate interval functions for user-defined functions
     for (i=0; i < n_expr; i++) validate_interval_functions(expression_list[i].func);
     
     // Print the function table
@@ -1910,12 +1940,21 @@ expression *parse_file(file_data *fd, char *stringbuf) {
         // and are thus not fixed but are also not plottable. However
         // dependents on such expressions may be plottable if they
         // produce a scalar as their output.
+        uint8_t dep_xy = 0;
+        if (expr->var) dep_xy = expr->var->flags & VARIABLE_XYLIKE;
         for (int j=0; j < expr->num_dependencies; j++) {
             if (!(expr->dependencies[j]->flags & EXPRESSION_FIXED)) {
                 expr->flags &= ~EXPRESSION_FIXED;
+                dep_xy |= expr->dependencies[j]->var->flags & VARIABLE_XYLIKE;
                 expr->num_nonfixed_dependencies++;
             }
+                
         }
+        if (!(expr->flags & EXPRESSION_FIXED) && ((dep_xy == VARIABLE_XLIKE) || (dep_xy == VARIABLE_YLIKE))) {
+            printf("Expression %p is plottable because it only has x or y\n", expr);
+            expr->flags |= EXPRESSION_PLOTTABLE;
+        }
+        if (expr->var) expr->var->flags |= dep_xy;
         expr = expr->next_expr;
         i++;
     }

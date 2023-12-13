@@ -80,11 +80,20 @@ typedef struct file_data_s {
     struct expression_s **deptable;
 } file_data;
 
+// Struct that contains information about a particular operator
 typedef struct oper_data_s {
-    uint32_t (*oper)(void*, double*);
-    char *name;
-    uint32_t (*inter)(void*, double*, double*);
+    uint32_t (*oper)(void*, double*);           // Pointer to the operator function
+    char *name;                                 // Name of the operator
+    uint32_t (*inter)(void*, double*, double*); // Pointer to the operator's interval function
 } oper_data;
+
+typedef struct integration_result_s {
+    struct function_s *func;                // Function being integrated
+    double lbv;                             // Lower integration bound
+    double ubv;                             // Upper integration bound
+    double result;                          // Result of the integration
+    uint8_t negate;                         // 1 if the result of the integration should be negated
+} integration_result;
 
 double parse_double(char *string);
 
