@@ -8,6 +8,8 @@
 #include <stdlib.h>
 #include <string.h>
 #include <complex.h>
+#include <gsl/gsl_integration.h>
+#include <gsl/gsl_errno.h>
 
 #define SIGN_BIT(v) (((v->value_type)&0x80) ? -1 : 1)
 #define VALUE(a) ((((a->value_type)&0x40) ? *(((variable*)(a->value))->pointer) : *((double*)(a->value))) * SIGN_BIT(a))
@@ -216,6 +218,10 @@ uint32_t func_sine(void *f, double *stackpos) {
 
 uint32_t func_cosine(void *f, double *stackpos) {
     return func_general_one_arg(f, stackpos, cos);
+}
+
+uint32_t func_tangent(void *f, double *stackpos) {
+    return func_general_one_arg(f, stackpos, tan);
 }
 
 uint32_t func_factorial(void *f, double *stackpos) {
@@ -1514,6 +1520,77 @@ uint32_t func_length(void *f, double *stackpos) {
     return 1<<8;
 }
 
+double integrate_func(double x, void *params) {
+    function *expr = (function*)(((void**)params)[0]);
+    double *stackpos = (double*)(((void**)params)[1]);
+    variable *var = (variable*)(((void**)params)[2]);
+    var->pointer = &x;
+    var->type = 1<<8;
+    expr->oper(expr, stackpos);
+    return stackpos[0];
+}
+
+uint32_t func_integrate_gsl(void *f, double *stackpos) {
+    function *fs = (function*)f;
+    function *var = fs->first_arg;
+    function *lb = var->next_arg;
+    function *ub = lb->next_arg;
+    function *expr = ub->next_arg;
+
+    lb->oper(lb, stackpos);
+    double lbv = stackpos[0];
+    ub->oper(ub, stackpos);
+    double ubv = stackpos[0];
+    integration_result *res = (integration_result*)(fs->value);
+    if (lbv == ubv) {
+        // Null case is not cached
+        stackpos[0] = 0;
+        return 1<<8;
+    }
+    uint8_t negate = 0;
+    if (lbv > ubv) {
+        negate = 1;
+        double t = lbv;
+        lbv = ubv;
+        ubv = t;
+    }
+    gsl_integration_workspace *w = gsl_integration_workspace_alloc(1000);
+    gsl_function F;
+    void *params[3] = {expr, stackpos, var->value};
+    F.function = &integrate_func;
+    F.params = params;
+    double result, error;
+    gsl_set_error_handler_off();
+    int status;
+    if (res && (res->func == fs) && (ubv-lbv >= res->ubv-res->lbv)) {
+        if (lbv == res->lbv) {
+            if (res->result == res->result) status = gsl_integration_qags(&F, res->ubv, ubv, 0, 1e-7, 1000, w, &result, &error);
+            result += res->result;
+        } else if (ubv == res->ubv) {
+            if (res->result == res->result) status = gsl_integration_qags(&F, lbv, res->lbv, 0, 1e-7, 1000, w, &result, &error);
+            result += res->result;
+        } else status = gsl_integration_qags(&F, lbv, ubv, 0, 1e-7, 1000, w, &result, &error);
+    } else status = gsl_integration_qags(&F, lbv, ubv, 0, 1e-7, 1000, w, &result, &error);
+    stackpos[0] = (negate ? -result : result);
+    if (status) {
+        stackpos[0] = NAN;
+        result = NAN;
+    }
+    /*else if (status) {
+        FAIL("ERROR: error %d while integrating from %f to %f, value %f: %s\n", status, lbv, result, ubv, gsl_strerror(status));
+    }*/
+    if (res) {
+        res->lbv = lbv;
+        res->ubv = ubv;
+        res->result = result;
+        res->func = fs;
+        res->negate = negate;
+    }
+    gsl_integration_workspace_free(w);
+    //printf("integrate from %f to %f, result %f\n", lbv, ubv, stackpos[0]);
+    return 1<<8;
+}
+
 double integrate_rec(function *func, double *stackpos, double *var, double lbv, double ubv, double *buf) {
     double result = 0;
     double xpos = INTEGRATE_DX;
@@ -1678,7 +1755,7 @@ uint32_t func_convert_polar(void *f, double *stackpos) {
 }
 
 
-#define N_OPERATORS 43
+#define N_OPERATORS 45
 const oper_data oper_list[N_OPERATORS] = {
     {func_value, "func_value", interval_value},
 
@@ -1688,7 +1765,8 @@ const oper_data oper_list[N_OPERATORS] = {
     {func_max, "func_max", NULL},
     {func_sine, "func_sine", interval_sine},
     {func_cosine, "func_cosine", interval_cosine},
-    {func_arctan, "func_arctan", NULL},
+    {func_tangent, "func_tangent", interval_tangent},
+    {func_arctan, "func_arctan", interval_arctan},
     {func_arcsin, "func_arcsin", NULL},
     {func_log, "func_log", NULL},
     {func_exp, "func_exp", interval_exp},
@@ -1726,6 +1804,7 @@ const oper_data oper_list[N_OPERATORS] = {
     {func_join, "func_join", NULL},
     {func_length, "func_length", NULL},
     {func_integrate, "func_integrate", NULL},
+    {func_integrate_gsl, "func_integrate_gsl", interval_integrate_gsl},
 
     {func_convert_polar, "func_convert_polar", NULL}
 };

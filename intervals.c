@@ -4,6 +4,8 @@
 #include <stdlib.h>
 #include <complex.h>
 #include <string.h>
+#include <gsl/gsl_integration.h>
+#include <gsl/gsl_errno.h>
 #include "intervals.h"
 #include "parse.h"
 #include "functions.h"
@@ -587,6 +589,21 @@ void misin(double *hstackpos, double *lstackpos) {
     micos(hstackpos, lstackpos);
 }
 
+void mitan(double *hstackpos, double *lstackpos) {
+    if (ceil(lstackpos[0]/M_PI - 0.5) <= floor(hstackpos[0]/M_PI - 0.5)) {
+        hstackpos[0] = INFINITY;
+        lstackpos[0] = -INFINITY;
+    } else {
+        hstackpos[0] = tan(hstackpos[0]);
+        lstackpos[0] = tan(lstackpos[0]);
+    }
+}
+
+void miarctan(double *hstackpos, double *lstackpos) {
+    hstackpos[0] = atan(hstackpos[0]);
+    lstackpos[0] = atan(lstackpos[0]);
+}
+
 void miexp(double *hstackpos, double *lstackpos) {
     hstackpos[0] = exp(hstackpos[0]);
     lstackpos[0] = exp(lstackpos[0]);
@@ -598,6 +615,14 @@ uint32_t interval_cosine(void *f, double *hstackpos, double *lstackpos) {
 
 uint32_t interval_sine(void *f, double *hstackpos, double *lstackpos) {
     return interval_general_one_arg(f, hstackpos, lstackpos, misin);
+}
+
+uint32_t interval_tangent(void *f, double *hstackpos, double *lstackpos) {
+    return interval_general_one_arg(f, hstackpos, lstackpos, mitan);
+}
+
+uint32_t interval_arctan(void *f, double *hstackpos, double *lstackpos) {
+    return interval_general_one_arg(f, hstackpos, lstackpos, miarctan);
 }
 
 uint32_t interval_exp(void *f, double *hstackpos, double *lstackpos) {
@@ -697,5 +722,119 @@ uint32_t interval_user_defined(void *f, double *hstackpos, double *lstackpos) {
     apply_sign(fs->value_type, hstackpos, lstackpos, st, len);
     //printf("return type is %08x\n", type); print_object(type, stackpos); printf("\n");
     return type;
+}
+
+double integrate_func_interval(double x, void *params) {
+    function *expr = (function*)(((void**)params)[0]);
+    double *hstackpos = (double*)(((void**)params)[1]);
+    double *lstackpos = (double*)(((void**)params)[2]);
+    uint8_t *flags = (uint8_t*)(((void**)params)[4]);
+    ((variable*)(((void**)params)[3]))->pointer = &x;
+    expr->inter(expr, hstackpos, lstackpos);
+    if (hstackpos[0] != lstackpos[0]) *flags &= 0x7f;
+    if (*flags & 0x01) return hstackpos[0];
+    else return lstackpos[0];
+}
+
+uint32_t interval_integrate_gsl(void *f, double *hstackpos, double *lstackpos) {
+    function *fs = (function*)f;
+    function *var = fs->first_arg;
+    function *lb = var->next_arg;
+    function *ub = lb->next_arg;
+    function *expr = ub->next_arg;
+
+    lb->inter(lb, hstackpos, lstackpos);
+    double lbv[2] = {lstackpos[0], hstackpos[0]};
+    ub->inter(ub, hstackpos, lstackpos);
+    double ubv[2] = {lstackpos[0], hstackpos[0]};
+    variable *varp = (variable*)(var->value);
+    
+    gsl_integration_workspace *w = gsl_integration_workspace_alloc(1000);
+    gsl_function F;
+    uint8_t flags = 0x80;
+    void *params[5] = {expr, hstackpos, lstackpos, var->value, &flags};
+    F.function = &integrate_func_interval;
+    F.params = params;
+    double hresult, lresult, error;
+    int hstatus=0, lstatus=0;
+    gsl_set_error_handler_off();
+    double diffh, diffl;
+    // No overlap, evaluate on the smallest possible range. If this is not valid,
+    // then the interval will be [NaN, NaN], indicating that the function is defined
+    // nowhere on the given intervals
+    double min_lbv = lbv[1];
+    double min_ubv = ubv[0];
+    double lstar, ustar;
+    double temp[2];
+    if (ubv[0] >= lbv[1]) {
+        lstar = lbv[1];
+        ustar = ubv[0];
+    } else if (lbv[0] >= ubv[1]) {
+        lstar = lbv[0];
+        ustar = ubv[1];
+    } else {
+        // lbv and ubv intervals overlap.
+        lstar = (fmin(ubv[1], lbv[1]) + fmax(ubv[0], ubv[0]))/2;
+        ustar = lstar;
+    }
+    lstatus = gsl_integration_qags(&F, lstar, ustar, 0, 1e-7, 1000, w, &lresult, &error);
+    if (!(flags & 0x80)) {
+        flags |= 0x01;
+        hstatus = gsl_integration_qags(&F, lstar, ustar, 0, 1e-7, 1000, w, &hresult, &error);
+    } else hresult = lresult;
+    if (lresult > hresult) {
+        temp[0] = hresult;
+        hresult = lresult;
+        lresult = temp[0];
+    }
+    if (lstatus || hstatus) {
+        // Minimum interval is invalid
+        hstackpos[0] = NAN;
+        lstackpos[0] = NAN;
+        printf("singularity from [%f, %f] to [%f, %f]\n", lbv[0], lbv[1], ubv[0], ubv[1]);
+        return 1<<8;
+    }
+
+    varp->pointer = temp;
+    varp->flags |= VARIABLE_INTERVAL;
+    diffh = 0; diffl = 0;
+    if (lbv[0] != lstar) {
+        temp[0] = lbv[0]; temp[1] = lstar;
+        expr->inter(expr, hstackpos, lstackpos);
+        diffh += lstackpos[0]*(lbv[0] - lstar);
+        diffl += hstackpos[0]*(lbv[0] - lstar);
+    }
+    if (lstar != lbv[1]) {
+        temp[0] = lstar; temp[1] = lbv[1];
+        expr->inter(expr, hstackpos, lstackpos);
+        lstackpos[0] *= (lbv[1] - lstar);
+        hstackpos[0] *= (lbv[1] - lstar);
+        if (lstackpos[0] < diffl) diffl = lstackpos[0];
+        if (hstackpos[0] > diffh) diffh = hstackpos[0];
+    }
+    lresult += diffl;
+    hresult += diffh;
+    diffl = 0; diffh = 0;
+    if (ubv[0] != ustar) {
+        temp[0] = ubv[0]; temp[1] = ustar;
+        expr->inter(expr, hstackpos, lstackpos);
+        diffh += lstackpos[0]*(ubv[0] - ustar);
+        diffl += hstackpos[0]*(ubv[0] - ustar);
+    }
+    if (ustar != ubv[1]) {
+        temp[0] = ustar; temp[1] = ubv[1];
+        expr->inter(expr, hstackpos, lstackpos);
+        lstackpos[0] *= (ubv[1] - ustar);
+        hstackpos[0] *= (ubv[1] - ustar);
+        if (lstackpos[0] < diffl) diffl = lstackpos[0];
+        if (hstackpos[0] > diffh) diffh = hstackpos[0];
+    }
+    lresult += diffl;
+    hresult += diffh;
+    varp->flags &= ~VARIABLE_INTERVAL;
+    printf("integral from [%f, %f] to [%f, %f] is [%f, %f]\n", lbv[0], lbv[1], ubv[0], ubv[1], lresult, hresult);
+    hstackpos[0] = hresult;
+    lstackpos[0] = lresult;
+    return 1<<8;
 }
 

@@ -24,6 +24,7 @@ uint32_t func_mod(void *f, double *stackpos);
 uint32_t func_max(void *f, double *stackpos);
 uint32_t func_sine(void *f, double *stackpos);
 uint32_t func_cosine(void *f, double *stackpos);
+uint32_t func_tangent(void *f, double *stackpos);
 uint32_t func_arctan(void *f, double *stackpos);
 uint32_t func_arcsin(void *f, double *stackpos);
 uint32_t func_log(void *f, double *stackpos);
@@ -66,6 +67,7 @@ uint32_t func_join(void *f, double *stackpos);
 uint32_t func_length(void *f, double *stackpos);
 
 uint32_t func_integrate(void *f, double *stackpos);
+uint32_t func_integrate_gsl(void *f, double *stackpos);
 uint32_t func_convert_polar(void *f, double *stackpos);
 
 #endif

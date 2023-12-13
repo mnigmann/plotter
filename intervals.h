@@ -15,11 +15,14 @@ uint32_t interval_compare(void *f, double *hstackpos, double *lstackpos);
 
 uint32_t interval_sine(void *f, double *hstackpos, double *lstackpos);
 uint32_t interval_cosine(void *f, double *hstackpos, double *lstackpos);
+uint32_t interval_tangent(void *f, double *hstackpos, double *lstackpos);
+uint32_t interval_arctan(void *f, double *hstackpos, double *lstackpos);
 uint32_t interval_exp(void *f, double *hstackpos, double *lstackpos);
 
 uint32_t interval_point(void *f, double *hstackpos, double *lstackpos);
 uint32_t interval_extract_x(void *f, double *hstackpos, double *lstackpos);
 uint32_t interval_extract_y(void *f, double *hstackpos, double *lstackpos);
 uint32_t interval_user_defined(void *f, double *hstackpos, double *lstackpos);
+uint32_t interval_integrate_gsl(void *f, double *hstackpos, double *lstackpos);
 #endif
 
