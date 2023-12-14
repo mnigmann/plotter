@@ -162,6 +162,33 @@ uint32_t eval_func(double t, double *x, double *y, expression *expr, double *sta
     return type;
 }
 
+void run_action(file_data *fd, function *action) {
+    clock_t t3 = clock();
+    action->oper(action, (fd->stack)+(fd->n_stack));
+    expression *expr = top_expr;
+    expression *from = NULL;
+    while (expr) {
+        if ((expr->var) && (expr->var->new_pointer)) {
+            printf("expression %p (offset %ld) has changed, expr->var %p\n", expr, expr - (fd->expression_list) + 1, expr->var);
+            if (!from) from = expr;
+            expr->var->pointer = expr->var->new_pointer;
+            expr->var->type = expr->var->new_type;
+            expr->var->new_pointer = NULL;
+            // If we assign to a variable, we must unlink the function block,
+            // or else the value will be overwritten
+            expr->func = NULL;
+        }
+        expr = expr->next_expr;
+    }
+    if (from) {
+        printf("evaluating from %p\n", from);
+        evaluate_from(fd, from);
+        clock_t t4 = clock();
+        printf("Total evaluation time: %luus\n", t4-t3);
+        gtk_widget_queue_draw(fd->drawing_area);
+    }
+}
+
 void est_radius(double x0, double y0, double x1, double y1, double x2, double y2, double *radius, double *speed) {
     double d01 = (x0 - x1)*(x0 - x1) + (y0 - y1)*(y0 - y1);
     double d02 = (x0 - x2)*(x0 - x2) + (y0 - y2)*(y0 - y2);
@@ -320,7 +347,7 @@ void draw_function_constant_ds_rec(expression *expr, file_data *fd, cairo_t *cr,
     } else if (expr->func->inter) {
         double tempdata[2] = {t_start, t_end};
         eval_inter(tempdata, expr->func, stackpos, lstackpos);
-        printf("Neither point in bounds for [%f, %f] but the interval is ([%f, %f], [%f, %f])\n", t_start, t_end, lstackpos[0], stackpos[0], lstackpos[1], stackpos[1]);
+        //printf("Neither point in bounds for [%f, %f] but the interval is ([%f, %f], [%f, %f])\n", t_start, t_end, lstackpos[0], stackpos[0], lstackpos[1], stackpos[1]);
         if ((lstackpos[1] > window_y1) || (stackpos[1] < window_y0) || (lstackpos[0] > window_x1) || (stackpos[0] < window_x0) || ((stackpos[0] != stackpos[0]) && (lstackpos[0] != lstackpos[0])) || ((stackpos[1] != stackpos[1]) && (lstackpos[1] != lstackpos[1]))) return;
         // If neither point is in-bounds, subdivide and iterate
         double t_avg = (t_end + t_start)/2;
@@ -902,29 +929,7 @@ static gboolean timeout_callback(gpointer data_pointer) {
     printf("timeout_callback\n");
     clock_t t3 = clock();
     file_data *fd = (file_data*)(data_pointer);
-    fd->expression_list[ticker_target].func->oper(fd->expression_list[ticker_target].func, (fd->stack)+(fd->n_stack));
-    expression *expr = top_expr;
-    expression *from = NULL;
-    while (expr) {
-        if ((expr->var) && (expr->var->new_pointer)) {
-            printf("expression %p (offset %ld) has changed, expr->var %p\n", expr, expr - (fd->expression_list) + 1, expr->var);
-            if (!from) from = expr;
-            expr->var->pointer = expr->var->new_pointer;
-            expr->var->type = expr->var->new_type;
-            expr->var->new_pointer = NULL;
-            // If we assign to a variable, we must unlink the function block,
-            // or else the value will be overwritten
-            expr->func = NULL;
-        }
-        expr = expr->next_expr;
-    }
-    if (from) {
-        printf("evaluating from %p\n", from);
-        evaluate_from(fd, from);
-        clock_t t4 = clock();
-        printf("Total evaluation time: %luus\n", t4-t3);
-        gtk_widget_queue_draw(fd->drawing_area);
-    }
+    run_action(fd, fd->expression_list[ticker_target].func);
     if (run_ticker) return TRUE;
     return FALSE;
 }
@@ -941,6 +946,17 @@ static gboolean keypress_callback(GtkWidget *widget, GdkEventKey *event, gpointe
         treeview_activate(fd);
         printf("inspecting\n");
     }
+    expression *expr;
+    function *action;
+    for (int i=0; i < fd->n_expr; i++) {
+        expr = fd->expression_list+i;
+        if ((expr->func) && (expr->func->oper == func_onkeypress) && (((double*)(expr->value))[0] == event->keyval)) {
+            action = *((function**)(((double*)(expr->value))+1));
+            printf("Calling action %p\n", action);
+            run_action(fd, action);
+        }
+    }
+            
     return TRUE;
 }
 

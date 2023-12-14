@@ -1754,8 +1754,18 @@ uint32_t func_convert_polar(void *f, double *stackpos) {
     return (len<<9) | (rtype & TYPE_LIST) | TYPE_POINT;
 }
 
+uint32_t func_onkeypress(void *f, double *stackpos) {
+    function *fs = (function*)f;
+    function *key = fs->first_arg;
+    function *action = key->next_arg;
+    key->oper(key, stackpos);
+    uint32_t code = (uint32_t)(stackpos[0]);
+    printf("Assigning %p to keypress event %d\n", action, code);
+    *((uint64_t*)(stackpos+1)) = (uint64_t)(action);
+    return 1<<9;
+}
 
-#define N_OPERATORS 45
+#define N_OPERATORS 46
 const oper_data oper_list[N_OPERATORS] = {
     {func_value, "func_value", interval_value},
 
@@ -1806,7 +1816,8 @@ const oper_data oper_list[N_OPERATORS] = {
     {func_integrate, "func_integrate", NULL},
     {func_integrate_gsl, "func_integrate_gsl", interval_integrate_gsl},
 
-    {func_convert_polar, "func_convert_polar", NULL}
+    {func_convert_polar, "func_convert_polar", NULL},
+    {func_onkeypress, "func_onkeypress", NULL}
 };
 
 const oper_data *oper_lookup(uint32_t (*ptr)(void*, double*)) {

@@ -9,16 +9,16 @@
 #include <math.h>
 #include <time.h>
 
-#define N_FUNCTIONS 17
+#define N_FUNCTIONS 18
 const char *function_names[N_FUNCTIONS] = {
     "arctan",       "cos",          "sin",          "mod",          "floor",        "polygon",      "total",        "distance",
     "rgb",          "max",          "abs",          "sort",         "join",         "length",       "solve",        "eigvals",
-    "unique"
+    "unique",       "onkeypress"
 };
 uint32_t (*function_pointers[N_FUNCTIONS])(void*, double*) = {
     func_arctan,    func_cosine,    func_sine,      func_mod,       func_floor,     func_polygon,   func_total,     func_distance,
     func_rgb,       func_max,       func_abs,       func_sort,      func_join,      func_length,    func_solve,     func_eigvals,
-    func_unique
+    func_unique,    func_onkeypress
 };
 
 int extract_braces(char* latex, int start) {
@@ -1842,7 +1842,11 @@ expression *parse_file(file_data *fd, char *stringbuf) {
             }
             // Special case for implicit functions
             if ((exprpos->func->oper == func_equals) || (exprpos->func->oper==func_compare) || (exprpos->func->oper == func_compare_single)) exprpos->flags |= EXPRESSION_PLOTTABLE;
-            if (exprpos->flags & EXPRESSION_ACTION) {
+            // func_onkeypress is not an action and should be automatically evaluated
+            if (exprpos->func->oper == func_onkeypress) {
+                exprpos->flags &= ~EXPRESSION_ACTION;
+            }
+            else if (exprpos->flags & EXPRESSION_ACTION) {
                 shift_blocks(function_list, last_pos, func_pos-last_pos);
                 func_pos++;
                 function_list[last_pos] = new_function(func_chain_actions, NULL, function_list+last_pos+1);

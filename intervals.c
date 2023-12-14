@@ -773,7 +773,7 @@ uint32_t interval_integrate_gsl(void *f, double *hstackpos, double *lstackpos) {
         lstar = lbv[0];
         ustar = ubv[1];
     } else {
-        // lbv and ubv intervals overlap.
+        // lbv and ubv intervals overlap
         lstar = (fmin(ubv[1], lbv[1]) + fmax(ubv[0], ubv[0]))/2;
         ustar = lstar;
     }
@@ -791,7 +791,6 @@ uint32_t interval_integrate_gsl(void *f, double *hstackpos, double *lstackpos) {
         // Minimum interval is invalid
         hstackpos[0] = NAN;
         lstackpos[0] = NAN;
-        printf("singularity from [%f, %f] to [%f, %f]\n", lbv[0], lbv[1], ubv[0], ubv[1]);
         return 1<<8;
     }
 
@@ -832,7 +831,6 @@ uint32_t interval_integrate_gsl(void *f, double *hstackpos, double *lstackpos) {
     lresult += diffl;
     hresult += diffh;
     varp->flags &= ~VARIABLE_INTERVAL;
-    printf("integral from [%f, %f] to [%f, %f] is [%f, %f]\n", lbv[0], lbv[1], ubv[0], ubv[1], lresult, hresult);
     hstackpos[0] = hresult;
     lstackpos[0] = lresult;
     return 1<<8;
