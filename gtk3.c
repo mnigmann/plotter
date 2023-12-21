@@ -798,8 +798,21 @@ gboolean redraw_all(GtkWidget *widget, cairo_t *cr, gpointer data_pointer) {
     expression *expression_list = fd->expression_list, *expr;
     double *stack = fd->stack;
     uint32_t n_stack = fd->n_stack;
+    uint32_t color_type, color_len;
     for (int i=0; i < fd->n_expr; i++) {
         expr = expression_list+i;
+        if (expr->color_pointer) {
+            printf("Expression %p (%d) has color pointer\n", expr, i+1);
+            color_type = expr->color_pointer->oper(expr->color_pointer, stack+n_stack);
+            if (!((color_type & TYPE_MASK) == TYPE_COLOR)) {
+                printf("ERROR: Color expression must return color\n");
+                exit(EXIT_FAILURE);
+            }
+            print_object(color_type, stack+n_stack); printf("\n");
+            color_len = color_type>>8;
+            fd->n_stack += color_len;
+            n_stack += color_len;
+        } else color_len = 0;
         if (expr->flags & EXPRESSION_PLOTTABLE) {
             if ((expr->flags & EXPRESSION_FIXED) && ((expr->value_type & TYPE_MASK) == TYPE_POINT)) {
 #ifdef DEBUG_PLOT
@@ -809,6 +822,7 @@ gboolean redraw_all(GtkWidget *widget, cairo_t *cr, gpointer data_pointer) {
                 double *ptr = expr->value;
                 SET_COLOR(cr, expr->color);
                 for (int p=0; p < len; p+=2) {
+                    if (expr->color_pointer) SET_COLOR(cr, (stack+n_stack-color_len+(p/2*3)%color_len));
                     pt_x = SCALE_XK(ptr[p]);
                     pt_y = SCALE_YK(ptr[p+1]);
                     cairo_arc(cr, pt_x, pt_y, POINT_SIZE, 0, 2*G_PI);
@@ -830,7 +844,7 @@ gboolean redraw_all(GtkWidget *widget, cairo_t *cr, gpointer data_pointer) {
                 for (int p=0; p < len; p += 2*MAX_POLYGON_SIZE) {
                     pt_x = SCALE_XK(ptr[p]);
                     pt_y = SCALE_YK(ptr[p+1]);
-                    //if (i == 19) SET_COLOR(cr, (expression_list[20].value+color_pos));
+                    //if (expr->color_pointer) SET_COLOR(cr, (expression_list[20].value+color_pos));
                     color_pos += 3;
                     cairo_move_to(cr, pt_x, pt_y);
                     for (int k=1; k < MAX_POLYGON_SIZE; k++) {
@@ -879,6 +893,8 @@ gboolean redraw_all(GtkWidget *widget, cairo_t *cr, gpointer data_pointer) {
 #endif
             }
         }
+        n_stack -= color_len;
+        fd->n_stack -= color_len;
     }
     t2 = clock();
     g_print("Redraw took %luus, %d expressions, bounds %f %f %f %f\n", t2-t1, n_expr, window_x0, window_y0, window_x1, window_y1);

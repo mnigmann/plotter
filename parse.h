@@ -60,7 +60,8 @@ typedef struct expression_s {
     int expr_begin;                         // Position on the line where the definition of the expression begins
     struct expression_s *next_expr;         // Next expression to be evaluated. Assigned during sort.
     uint8_t flags;                          // Flags for the expression
-    uint8_t color[4];
+    uint8_t color[4];                       // Color in RGBA, 0-255
+    struct function_s *color_pointer;       // Pointer to a function block that produces the color
     double *value;                          // Pointer to the value of the expression. Used when plotting
     uint32_t value_type;                    // Type of the last value of the expression. Used when plotting
     char *def;                              // Pointer to char array containing definition. Freed after parsing

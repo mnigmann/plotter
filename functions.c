@@ -1765,7 +1765,13 @@ uint32_t func_onkeypress(void *f, double *stackpos) {
     return 1<<9;
 }
 
-#define N_OPERATORS 46
+uint32_t func_color(void *f, double *stackpos) {
+    function *fs = (function*)f;
+    function *target = fs->first_arg;
+    return target->oper(target, stackpos);
+}
+
+#define N_OPERATORS 47
 const oper_data oper_list[N_OPERATORS] = {
     {func_value, "func_value", interval_value},
 
@@ -1817,7 +1823,8 @@ const oper_data oper_list[N_OPERATORS] = {
     {func_integrate_gsl, "func_integrate_gsl", interval_integrate_gsl},
 
     {func_convert_polar, "func_convert_polar", NULL},
-    {func_onkeypress, "func_onkeypress", NULL}
+    {func_onkeypress, "func_onkeypress", NULL},
+    {func_color, "func_color", NULL}
 };
 
 const oper_data *oper_lookup(uint32_t (*ptr)(void*, double*)) {

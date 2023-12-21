@@ -9,16 +9,16 @@
 #include <math.h>
 #include <time.h>
 
-#define N_FUNCTIONS 18
+#define N_FUNCTIONS 19
 const char *function_names[N_FUNCTIONS] = {
     "arctan",       "cos",          "sin",          "mod",          "floor",        "polygon",      "total",        "distance",
     "rgb",          "max",          "abs",          "sort",         "join",         "length",       "solve",        "eigvals",
-    "unique",       "onkeypress"
+    "unique",       "onkeypress",   "color",
 };
 uint32_t (*function_pointers[N_FUNCTIONS])(void*, double*) = {
     func_arctan,    func_cosine,    func_sine,      func_mod,       func_floor,     func_polygon,   func_total,     func_distance,
     func_rgb,       func_max,       func_abs,       func_sort,      func_join,      func_length,    func_solve,     func_eigvals,
-    func_unique,    func_onkeypress
+    func_unique,    func_onkeypress,func_color
 };
 
 int extract_braces(char* latex, int start) {
@@ -137,6 +137,7 @@ expression new_expression(variable *var, function *func, expression **dependenci
     expr.next_expr = NULL;
     expr.value = NULL;
     expr.value_type = 0;
+    expr.color_pointer = NULL;
     return expr;
 }
 
@@ -1969,7 +1970,12 @@ expression *parse_file(file_data *fd, char *stringbuf) {
     printf("\n");
     // Print the expression table
     for (i=0; i < n_expr; i++) {
-        printf("expression pointer at %p, function %p, variable %p, flags %02x, begin %d, dep %p, num %d, nf %d\n", expression_list+i, expression_list[i].func, expression_list[i].var, expression_list[i].flags, expression_list[i].expr_begin, expression_list[i].dependencies, expression_list[i].num_dependencies, expression_list[i].num_nonfixed_dependencies);
+        expr = expression_list+i;
+        if (expr->func->oper == func_color) {
+            expr->func = expr->func->first_arg;
+            expr->color_pointer = expr->func->next_arg;
+        }
+        printf("expression pointer at %p, function %p, variable %p, flags %02x, begin %d, dep %p, num %d, nf %d\n", expr, expr->func, expr->var, expr->flags, expr->expr_begin, expr->dependencies, expr->num_dependencies, expr->num_nonfixed_dependencies);
     }
 
     for (i=0; variable_list+i < varpos; i++)
