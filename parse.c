@@ -1496,13 +1496,15 @@ void validate_interval_functions(function *func) {
     }
 }
 
-uint8_t check_fixed(function *func) {
-    if ((func->oper == func_value) && (func->value_type & 0x40)) return ((variable*)(func->value))->flags & VARIABLE_XYLIKE;
+uint8_t check_fixed(variable *variable_list, function *func) {
+    variable *var = ((variable*)(func->value));
+    if ((func->oper == func_value) && (func->value_type & 0x40)) 
+        return (var->flags & VARIABLE_XYLIKE) || ((var >= variable_list) && (var - variable_list < 2));
 
     function *arg = func->first_arg;
     uint8_t result = 0;
     while (arg) {
-        result |= check_fixed(arg);
+        result |= check_fixed(variable_list, arg);
         arg = arg->next_arg;
     }
     return result;
@@ -1887,7 +1889,7 @@ expression *parse_file(file_data *fd, char *stringbuf) {
         if (function_list[i].oper == func_user_defined) {
             function_list[i].value = ((variable*)(function_list[i].value))->pointer;
         }
-        if (function_list[i].oper == func_integrate_gsl) {
+        if ((function_list[i].oper == func_integrate_gsl) && !(check_fixed(variable_list, function_list[i].first_arg->next_arg->next_arg->next_arg))) {
             function_list[i].value = malloc(sizeof(integration_result));
             printf("assigning %p to function %p (%d)\n", function_list[i].value, function_list+i, i);
         }

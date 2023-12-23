@@ -114,6 +114,7 @@ uint32_t interval_value(void *f, double *hstackpos, double *lstackpos) {
                 lstackpos[i] = ptr[i];
             }
         }
+        //printf("variable %s (%p), flags %02x has interval [%f, %f], len %d, result [%f, %f]\n", var->name, var, var->flags, ptr[0], hpos[0], len, lstackpos[0], hstackpos[0]);
         return type;
     } else {
         type = fs->value_type;
@@ -708,6 +709,7 @@ uint32_t interval_user_defined(void *f, double *hstackpos, double *lstackpos) {
         type = arg->inter(arg, hstackpos, lstackpos+st);
         len = type>>8;
         memcpy(lstackpos+st+len, hstackpos, len*sizeof(double));
+        //printf("argument is %p [%f, %f]\n", arg, lstackpos[st], hstackpos[st]);
         target_arg[varnum].pointer = lstackpos+st;
         target_arg[varnum].type = type;
         target_arg[varnum].flags |= VARIABLE_INTERVAL;
@@ -717,6 +719,7 @@ uint32_t interval_user_defined(void *f, double *hstackpos, double *lstackpos) {
         arg = arg->next_arg;
     } while (arg);
     type = target->inter(target, hstackpos+st, lstackpos+st);
+    //printf("target %p, type %08x, [%f, %f]\n", target, type, lstackpos[st], hstackpos[st]);
     len = type>>8;
     // Shrink the stack by removing unused values
     apply_sign(fs->value_type, hstackpos, lstackpos, st, len);
@@ -731,6 +734,7 @@ double integrate_func_interval(double x, void *params) {
     uint8_t *flags = (uint8_t*)(((void**)params)[4]);
     ((variable*)(((void**)params)[3]))->pointer = &x;
     expr->inter(expr, hstackpos, lstackpos);
+    //printf("interval of integrant is [%f, %f] at %f\n", lstackpos[0], hstackpos[0], x);
     if (hstackpos[0] != lstackpos[0]) *flags &= 0x7f;
     if (*flags & 0x01) return hstackpos[0];
     else return lstackpos[0];
@@ -752,6 +756,7 @@ uint32_t interval_integrate_gsl(void *f, double *hstackpos, double *lstackpos) {
     gsl_integration_workspace *w = gsl_integration_workspace_alloc(1000);
     gsl_function F;
     uint8_t flags = 0x80;
+    ((variable*)(var->value))->type = 1<<8;
     void *params[5] = {expr, hstackpos, lstackpos, var->value, &flags};
     F.function = &integrate_func_interval;
     F.params = params;
@@ -779,9 +784,11 @@ uint32_t interval_integrate_gsl(void *f, double *hstackpos, double *lstackpos) {
     }
     lstatus = gsl_integration_qags(&F, lstar, ustar, 0, 1e-7, 1000, w, &lresult, &error);
     if (!(flags & 0x80)) {
+        //printf("computing hresult separately\n");
         flags |= 0x01;
         hstatus = gsl_integration_qags(&F, lstar, ustar, 0, 1e-7, 1000, w, &hresult, &error);
     } else hresult = lresult;
+    //printf("lresult %f, hresult %f, lstar %f, ustar %f\n", lresult, hresult, lstar, ustar);
     if (lresult > hresult) {
         temp[0] = hresult;
         hresult = lresult;

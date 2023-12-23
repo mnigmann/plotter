@@ -22,6 +22,9 @@
 #define PARSE_NEWVAR 0x02
 #define PARSE_ACTION 0x04
 
+#define FIND_NEAREST_UNSUPPORTED 0x01
+#define FIND_NEAREST_NOCONV 0x02
+
 /*
  * Data structures used for this program
  *  * Function list that stores function blocks
@@ -79,6 +82,10 @@ typedef struct file_data_s {
     uint32_t n_stack;
     GtkWidget *drawing_area;
     struct expression_s **deptable;
+    cairo_surface_t *surface;
+    cairo_surface_t *overlay;
+    uint8_t use_overlay;
+    struct expression_s *click_expr;
 } file_data;
 
 // Struct that contains information about a particular operator

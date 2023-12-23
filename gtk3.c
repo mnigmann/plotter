@@ -162,33 +162,6 @@ uint32_t eval_func(double t, double *x, double *y, expression *expr, double *sta
     return type;
 }
 
-void run_action(file_data *fd, function *action) {
-    clock_t t3 = clock();
-    action->oper(action, (fd->stack)+(fd->n_stack));
-    expression *expr = top_expr;
-    expression *from = NULL;
-    while (expr) {
-        if ((expr->var) && (expr->var->new_pointer)) {
-            printf("expression %p (offset %ld) has changed, expr->var %p\n", expr, expr - (fd->expression_list) + 1, expr->var);
-            if (!from) from = expr;
-            expr->var->pointer = expr->var->new_pointer;
-            expr->var->type = expr->var->new_type;
-            expr->var->new_pointer = NULL;
-            // If we assign to a variable, we must unlink the function block,
-            // or else the value will be overwritten
-            expr->func = NULL;
-        }
-        expr = expr->next_expr;
-    }
-    if (from) {
-        printf("evaluating from %p\n", from);
-        evaluate_from(fd, from);
-        clock_t t4 = clock();
-        printf("Total evaluation time: %luus\n", t4-t3);
-        gtk_widget_queue_draw(fd->drawing_area);
-    }
-}
-
 void est_radius(double x0, double y0, double x1, double y1, double x2, double y2, double *radius, double *speed) {
     double d01 = (x0 - x1)*(x0 - x1) + (y0 - y1)*(y0 - y1);
     double d02 = (x0 - x2)*(x0 - x2) + (y0 - y2)*(y0 - y2);
@@ -724,23 +697,154 @@ void draw_implicit(expression *expr, file_data *fd, uint8_t *color, cairo_t *cr)
     expr->func->oper = old_oper;
 }
 
-static gboolean button_press_callback (GtkWidget *event_box, GdkEventButton *event, gpointer data) {
+void reset_overlay(file_data *fd) {
+    cairo_t *cr = cairo_create(fd->overlay);
+    cairo_operator_t oper = cairo_get_operator(cr);
+    cairo_set_operator(cr, CAIRO_OPERATOR_CLEAR);
+    cairo_set_source_rgba(cr, 0, 0, 0, 0);
+    cairo_paint(cr);
+    cairo_set_operator(cr, oper);
+    fd->use_overlay = 0;
+    fd->click_expr = NULL;
+    cairo_destroy(cr);
+}
+
+uint8_t find_nearest_point(file_data *fd, expression *expr, double x, double y, double *mindist, int *index, double *xf, double *yf, uint8_t force) {
+    double *stack = fd->stack, *lstack = fd->lstack;
+    uint32_t n_stack = fd->n_stack;
+    double dist;
+    *mindist = INFINITY;
+    if (expr->flags & EXPRESSION_PLOTTABLE) {
+        if ((expr->flags & EXPRESSION_FIXED) && ((expr->value_type & TYPE_MASK) == TYPE_POINT)) {
+            int len = (expr->value_type) >> 8;
+            double *ptr = expr->value;
+            double pt_x, pt_y;
+            for (int p=0; p < len; p+=2) {
+                pt_x = SCALE_XK(ptr[p]);
+                pt_y = SCALE_YK(ptr[p+1]);
+                dist = hypot(pt_x - x, pt_y - y);
+                if ((p == 0) || (dist < *mindist)) {
+                    *mindist = dist;
+                    *index = p/2;
+                    *xf = ptr[p];
+                    *yf = ptr[p+1];
+                }
+            }
+        } else if ((expr->func->oper == func_equals) || (expr->func->oper == func_compare) || (expr->func->oper == func_compare_single)) {
+            double x0 = x/xscale + window_x0;
+            double y0 = window_y1 - y/yscale;
+            double xc = x0, yc = y0;
+            double temp, f00, f10, f01;
+            double inter[4] = {x0, 0, y0, 0};
+            inter[1] = inter[0] + CLICK_MAX_RADIUS/xscale;
+            inter[0] -= CLICK_MAX_RADIUS/xscale;
+            inter[3] = inter[2] + CLICK_MAX_RADIUS/yscale;
+            inter[2] -= CLICK_MAX_RADIUS/yscale;
+            eval_inter_2d(inter, inter+2, expr, stack+n_stack, lstack);
+            uint32_t (*old_oper)(void*, double*) = expr->func->oper;
+            if (expr->func->oper == func_equals) expr->func->oper = func_sub;
+            else if (expr->func->oper == func_compare_single) expr->func->oper = func_compare_sub_single;
+            else if (expr->func->oper == func_compare) expr->func->oper = func_compare_sub;
+            if (((stack[n_stack] >= 0) && (lstack[0] <= 0)) || force) {
+                for (int j=0; j < CLICK_MAX_ITER; j++) {
+                    eval_func_2d(&x0, &y0, expr, stack+n_stack);
+                    f00 = stack[n_stack];
+                    temp = x0+PLOT_DT_DERIV;
+                    eval_func_2d(&temp, &y0, expr, stack+n_stack);
+                    f10 = stack[n_stack];
+                    temp = y0+PLOT_DT_DERIV;
+                    eval_func_2d(&x0, &temp, expr, stack+n_stack);
+                    f01 = stack[n_stack];
+                    temp = f00 / (pow((f10 - f00)/PLOT_DT_DERIV, 2) + pow((f01 - f00)/PLOT_DT_DERIV, 2));
+                    x0 -= temp*(f10 - f00)/PLOT_DT_DERIV;
+                    y0 -= temp*(f01 - f00)/PLOT_DT_DERIV;
+                }
+                *mindist = hypot((x0-xc)*xscale, (y0-yc)*yscale);
+                *index = 0;
+                *xf = x0;
+                *yf = y0;
+                eval_func_2d(&x0, &y0, expr, stack+n_stack);
+                if (fabs(stack[n_stack]) >= CLICK_IMPLICIT_MAX_ERROR) {
+                    expr->func->oper = old_oper;
+                    return FIND_NEAREST_NOCONV;
+                }
+            }
+            expr->func->oper = old_oper;
+        } else {
+            return FIND_NEAREST_UNSUPPORTED;
+        }
+    }
+    return 0;
+}
+
+void draw_labeled_point(cairo_t *cr, double xf, double yf) {
+    cairo_set_source_rgb(cr, 0, 0, 1);
+    cairo_set_line_width(cr, 1);
+    double xk = SCALE_XK(xf), yk = SCALE_YK(yf);
+    cairo_rectangle(cr, xk - CLICK_MAX_RADIUS, yk - CLICK_MAX_RADIUS, 2*CLICK_MAX_RADIUS, 2*CLICK_MAX_RADIUS);
+    cairo_stroke(cr);
+    
+    cairo_select_font_face(cr, "Verdana", CAIRO_FONT_SLANT_NORMAL, CAIRO_FONT_WEIGHT_NORMAL);
+    cairo_set_font_size(cr, 12);
+    cairo_move_to(cr, xk, yk);
+    char temp[50];
+    sprintf(temp, "(%f, %f)", xf, yf);
+    cairo_show_text(cr, temp);
+}
+
+static gboolean button_press_callback (GtkWidget *event_box, GdkEventButton *event, gpointer data_pointer) {
+    file_data *fd = (file_data*)(data_pointer);
     g_print ("Clicked at %f, %f\n", event->x, event->y);
+    expression *expression_list = fd->expression_list, *expr;
+    double dist, mindist=INFINITY;
+    int expr_clicked=0, index=0;
+    int temp_index;
+    double *stack = fd->stack, *lstack = fd->lstack;
+    uint32_t n_stack = fd->n_stack;
+    double xf, yf, temp_xf, temp_yf;
+    for (int i=0; i < fd->n_expr; i++) {
+        expr = expression_list+i;
+        find_nearest_point(fd, expr, event->x, event->y, &dist, &temp_index, &temp_xf, &temp_yf, 0);
+        if ((i == 0) || (dist < mindist)) {
+            xf = temp_xf;
+            yf = temp_yf;
+            index = temp_index;
+            mindist = dist;
+            expr_clicked = i;
+        }
+    }
+    if ((mindist != INFINITY) && (mindist < CLICK_MAX_RADIUS)) {
+        printf("User clicked on expression %d, index %d\n", expr_clicked, index);
+        cairo_t *cr = cairo_create(fd->overlay);
+        draw_labeled_point(cr, xf, yf);
+        cairo_destroy(cr);
+        fd->use_overlay = 1;
+        fd->click_expr = expression_list + expr_clicked;
+        gtk_widget_queue_draw(fd->drawing_area);
+    }
     click_x = event->x;
     click_y = event->y;
     click_state = 1;
     return TRUE;
 }
 
-static gboolean button_release_callback (GtkWidget *event_box, GdkEventButton *event, gpointer data) {
+static gboolean button_release_callback (GtkWidget *event_box, GdkEventButton *event, gpointer data_pointer) {
+    file_data *fd = (file_data*)(data_pointer);
+    printf("Clearing overlay\n");
+    reset_overlay(fd);
     click_x = event->x;
     click_y = event->y;
     click_state = 0;
+    gtk_widget_queue_draw(fd->drawing_area);
     return TRUE;
 }
 
-gboolean redraw_all(GtkWidget *widget, cairo_t *cr, gpointer data_pointer) {
-    file_data *fd = (file_data*)(data_pointer);
+void redraw_all(file_data *fd) {
+    reset_overlay(fd);
+
+    cairo_t *cr = cairo_create(fd->surface);
+    cairo_set_source_rgb(cr, 1, 1, 1);
+    cairo_paint(cr);
     cairo_set_source_rgb(cr, COLOR_MAJOR_GRID/256.0, COLOR_MAJOR_GRID/256.0, COLOR_MAJOR_GRID/256.0);
     cairo_set_line_width(cr, 1.0);
     
@@ -896,12 +1000,64 @@ gboolean redraw_all(GtkWidget *widget, cairo_t *cr, gpointer data_pointer) {
         n_stack -= color_len;
         fd->n_stack -= color_len;
     }
+    cairo_destroy(cr);
     t2 = clock();
     g_print("Redraw took %luus, %d expressions, bounds %f %f %f %f\n", t2-t1, n_expr, window_x0, window_y0, window_x1, window_y1);
+}
+
+gboolean redraw_callback(GtkWidget *widget, cairo_t *cr, gpointer data_pointer) {
+    file_data *fd = (file_data*)(data_pointer);
+    cairo_set_source_surface(cr, fd->surface, 0, 0);
+    cairo_paint(cr);
+    if (fd->use_overlay) {
+        cairo_set_source_surface(cr, fd->overlay, 0, 0);
+        cairo_paint(cr);
+    }
     return FALSE;
 }
 
+void run_action(file_data *fd, function *action) {
+    clock_t t3 = clock();
+    action->oper(action, (fd->stack)+(fd->n_stack));
+    expression *expr = top_expr;
+    expression *from = NULL;
+    while (expr) {
+        if ((expr->var) && (expr->var->new_pointer)) {
+            printf("expression %p (offset %ld) has changed, expr->var %p\n", expr, expr - (fd->expression_list) + 1, expr->var);
+            if (!from) from = expr;
+            expr->var->pointer = expr->var->new_pointer;
+            expr->var->type = expr->var->new_type;
+            expr->var->new_pointer = NULL;
+            // If we assign to a variable, we must unlink the function block,
+            // or else the value will be overwritten
+            expr->func = NULL;
+        }
+        expr = expr->next_expr;
+    }
+    if (from) {
+        printf("evaluating from %p\n", from);
+        evaluate_from(fd, from);
+        clock_t t4 = clock();
+        printf("Total evaluation time: %luus\n", t4-t3);
+        redraw_all(fd);
+        gtk_widget_queue_draw(fd->drawing_area);
+    }
+}
+
+static gboolean configure_callback(GtkWidget *widget, GdkEventConfigure *event, gpointer data_pointer) {
+    file_data *fd = (file_data*)(data_pointer);
+    if (fd->surface) cairo_surface_destroy(fd->surface);
+    fd->surface = gdk_window_create_similar_surface(gtk_widget_get_window(widget), CAIRO_CONTENT_COLOR,
+                                                    gtk_widget_get_allocated_width(widget), gtk_widget_get_allocated_height(widget));
+    if (fd->overlay) cairo_surface_destroy(fd->overlay);
+    fd->overlay = gdk_window_create_similar_surface(gtk_widget_get_window(widget), CAIRO_CONTENT_COLOR_ALPHA,
+                                                    gtk_widget_get_allocated_width(widget), gtk_widget_get_allocated_height(widget));
+    redraw_all(fd);
+    return TRUE;
+}
+
 static gboolean scroll_callback (GtkWidget *event_box, GdkEventScroll *event, gpointer data_pointer) {
+    file_data *fd = (file_data*)(data_pointer);
     //g_print ("Scrolled at %f, %f, direction %d, data_pointer: %p\n", event->x, event->y, event->direction, data_pointer);
     double center_x = ((int32_t)(event->x))/xscale + window_x0;
     double center_y = window_y1 - ((int32_t)(event->y))/yscale;
@@ -923,20 +1079,38 @@ static gboolean scroll_callback (GtkWidget *event_box, GdkEventScroll *event, gp
     }
 
     if (redraw) {
-        gtk_widget_queue_draw(((file_data*)(data_pointer))->drawing_area);
+        redraw_all(fd);
+        gtk_widget_queue_draw(fd->drawing_area);
     }
     return TRUE;
 }
 
 static gboolean motion_callback(GtkWidget *event_box, GdkEventMotion *event, gpointer data_pointer) {
-    if (click_state) {
+    file_data *fd = (file_data*)(data_pointer);
+    if ((click_state) && (fd->use_overlay) && (fd->click_expr)) {
+        double xf, yf, dist;
+        int index;
+        uint8_t status = find_nearest_point(fd, fd->click_expr, event->x, event->y, &dist, &index, &xf, &yf, 1);
+        cairo_t *cr = cairo_create(fd->overlay);
+        // Clear background
+        cairo_operator_t oper = cairo_get_operator(cr);
+        cairo_set_operator(cr, CAIRO_OPERATOR_CLEAR);
+        cairo_set_source_rgba(cr, 0, 0, 0, 0);
+        cairo_paint(cr);
+        cairo_set_operator(cr, oper);
+        // Draw rectangle
+        if (!status) draw_labeled_point(cr, xf, yf);
+        cairo_destroy(cr);
+        gtk_widget_queue_draw(fd->drawing_area);
+    } else if (click_state) {
         double dx = (event->x - click_x)/xscale;
         double dy = (click_y - event->y)/yscale;
         window_x0 -= dx; window_x1 -= dx; window_y0 -= dy; window_y1 -= dy;
         click_x = event->x;
         click_y = event->y;
         uint8_t color[4] = {255, 255, 255, 0};
-        gtk_widget_queue_draw(((file_data*)(data_pointer))->drawing_area);
+        redraw_all(fd);
+        gtk_widget_queue_draw(fd->drawing_area);
     }
     return TRUE;
 }
@@ -1016,7 +1190,8 @@ static void activate (GtkApplication *app, gpointer user_data) {
     g_signal_connect(G_OBJECT(event_box), "button_release_event", G_CALLBACK(button_release_callback), fd);
     g_signal_connect(G_OBJECT(event_box), "scroll_event", G_CALLBACK(scroll_callback), fd);
     g_signal_connect(G_OBJECT(event_box), "motion-notify-event", G_CALLBACK(motion_callback), fd);
-    g_signal_connect(G_OBJECT(drawing_area), "draw", G_CALLBACK(redraw_all), fd);
+    g_signal_connect(G_OBJECT(drawing_area), "draw", G_CALLBACK(redraw_callback), fd);
+    g_signal_connect(G_OBJECT(drawing_area), "configure-event", G_CALLBACK(configure_callback), fd);
     g_signal_connect(window, "key-press-event", G_CALLBACK(keypress_callback), fd);
     gtk_container_add(GTK_CONTAINER(event_box), drawing_area);
 
@@ -1043,6 +1218,10 @@ int main (int argc, char **argv) {
     fd.n_func = 0;
     fd.n_stack = 0;
     fd.deptable = deptable;
+    fd.surface = NULL;
+    fd.overlay = NULL;
+    fd.use_overlay = 0;
+    fd.click_expr = NULL;
     
     uint32_t n_func = 0;
     uint32_t n_var = 0;
@@ -1052,6 +1231,10 @@ int main (int argc, char **argv) {
     ticker_target = (int)parse_double(argv[2]);
     ticker_step = (int)parse_double(argv[3]);
     printf("Expression %d will be evaluated every %d milliseconds\n", ticker_target, ticker_step);
+    //double area[4] = {0.9, 1, 1.2, 1.25};
+    //eval_inter_2d(area, area+2, expression_list+5, stack+n_stack, lstack);
+    //printf("interval is [%f, %f]\n", lstack[0], stack[n_stack]);
+    //exit(EXIT_FAILURE);
 
     uint32_t type;
 
