@@ -397,6 +397,7 @@ void draw_implicit_rec(expression *expr, file_data *fd, cairo_t *cr, uint8_t *co
     function *func = expr->func;
 #ifdef PLOT_USE_INEQUALITY
     uint8_t ineq = 0;
+    uint8_t singular = 0;
     if (func->oper == func_compare_sub_single) ineq = 1;
     if (func->oper == func_compare_sub) ineq = 1;
 #endif
@@ -419,7 +420,7 @@ void draw_implicit_rec(expression *expr, file_data *fd, cairo_t *cr, uint8_t *co
         //cairo_stroke(cr);
         return;
     }
-    if (divisions == PLOT_IMPLICIT_MAXDEPTH) {
+    if (divisions >= PLOT_IMPLICIT_MAXDEPTH) {
         // Maximum depth reached
         //printf("    maximum depth reached on ([%f, %f], [%f, %f]) --> [%f, %f]\n", area[0], area[1], area[2], area[3], lstackpos[0], stackpos[0]);
         //cairo_rectangle(cr, SCALE_XK(area[0]), SCALE_YK(area[3]), xscale*(area[1] - area[0]), yscale*(area[3] - area[2]));
@@ -428,31 +429,6 @@ void draw_implicit_rec(expression *expr, file_data *fd, cairo_t *cr, uint8_t *co
         function *arg2 = arg1->next_arg;
         double x0 = area[0], x1 = area[1], y0 = area[2], y1 = area[3];
         double e00, e10, e11, e01;
-        /*fd->variable_list[0].pointer = &x0;
-        fd->variable_list[1].pointer = &y0;
-        arg1->oper(arg1, stackpos);
-        double e00 = stackpos[0];
-        arg2->oper(arg2, stackpos);
-        e00 -= stackpos[0];
-        fd->variable_list[0].pointer = &x1;
-        fd->variable_list[1].pointer = &y0;
-        arg1->oper(arg1, stackpos);
-        double e10 = stackpos[0];
-        arg2->oper(arg2, stackpos);
-        e10 -= stackpos[0];
-        fd->variable_list[0].pointer = &x1;
-        fd->variable_list[1].pointer = &y1;
-        arg1->oper(arg1, stackpos);
-        double e11 = stackpos[0];
-        arg2->oper(arg2, stackpos);
-        e11 -= stackpos[0];
-        fd->variable_list[0].pointer = &x0;
-        fd->variable_list[1].pointer = &y1;
-        arg1->oper(arg1, stackpos);
-        double e01 = stackpos[0];
-        arg2->oper(arg2, stackpos);
-        e01 -= stackpos[0];
-        nfev += 4;*/
         eval_func_2d(&x0, &y0, expr, stackpos); e00 = stackpos[0];
         eval_func_2d(&x1, &y0, expr, stackpos); e10 = stackpos[0];
         eval_func_2d(&x1, &y1, expr, stackpos); e11 = stackpos[0];
@@ -470,6 +446,17 @@ void draw_implicit_rec(expression *expr, file_data *fd, cairo_t *cr, uint8_t *co
 #endif
             return;
         }
+        if (isinf(stackpos[0]) || isinf(lstackpos[0])) {
+            // Singularity in the interval
+            //printf("Singularity detected in ([%f, %f], [%f, %f])\n", area[0], area[1], area[2], area[3]);
+            e00 = 1/e00;
+            e10 = 1/e10;
+            e11 = 1/e11;
+            e01 = 1/e01;
+            singular = 1;
+        }
+        double stroke_opacity = 1-singular;
+        SET_COLOR_OPACITY(cr, color, stroke_opacity);
 
         double npos, epos, spos, wpos;
         uint8_t edges = 0;
@@ -492,6 +479,22 @@ void draw_implicit_rec(expression *expr, file_data *fd, cairo_t *cr, uint8_t *co
             // west edge
             edges |= 0x8;
             wpos = y0 - e00*(y0 - y1)/(e00 - e01);
+        }
+        if (((singular) || (edges == 0)) && (divisions < PLOT_IMPLICIT_HARDMAX)) {
+            //printf("Unresolved detail in ([%f, %f], [%f, %f])\n", area[0], area[1], area[2], area[3]);
+            // Subdivide
+            double x0 = area[0], x1 = area[1], y0 = area[2], y1 = area[3];
+            double xm = (x0 + x1)/2, ym = (y0 + y1)/2;
+            //printf("subdividing ([%f, %f], [%f, %f]), %f, %f\n", x0, x1, y0, y1, xm, ym);
+            area[1] = xm; area[3] = ym;
+            draw_implicit_rec(expr, fd, cr, color, area, divisions+1);
+            area[0] = xm; area[1] = x1; area[2] = y0; area[3] = ym;
+            draw_implicit_rec(expr, fd, cr, color, area, divisions+1);
+            area[0] = x0; area[1] = xm; area[2] = ym; area[3] = y1;
+            draw_implicit_rec(expr, fd, cr, color, area, divisions+1);
+            area[0] = xm; area[1] = x1; area[2] = ym; area[3] = y1;
+            draw_implicit_rec(expr, fd, cr, color, area, divisions+1);
+            return;
         }
         // If two edges are selected, then draw the line between those two edges. If three 
         // edges are selected, then one of the corners must be zero so the contour must go
@@ -528,7 +531,7 @@ void draw_implicit_rec(expression *expr, file_data *fd, cairo_t *cr, uint8_t *co
                     cairo_close_path(cr);
                     cairo_fill(cr);
                 }
-                SET_COLOR_OPACITY(cr, color, 1);
+                SET_COLOR_OPACITY(cr, color, stroke_opacity);
 #endif
                 cairo_move_to(cr, sspos, sy0);
                 cairo_line_to(cr, snpos, sy1);
@@ -555,7 +558,7 @@ void draw_implicit_rec(expression *expr, file_data *fd, cairo_t *cr, uint8_t *co
                     }
                     cairo_close_path(cr);
                     cairo_fill(cr);
-                    SET_COLOR_OPACITY(cr, color, 1);
+                    SET_COLOR_OPACITY(cr, color, stroke_opacity);
                 } else
 #endif
                 cairo_stroke(cr);
@@ -578,7 +581,7 @@ void draw_implicit_rec(expression *expr, file_data *fd, cairo_t *cr, uint8_t *co
                     }
                     cairo_close_path(cr);
                     cairo_fill(cr);
-                    SET_COLOR_OPACITY(cr, color, 1);
+                    SET_COLOR_OPACITY(cr, color, stroke_opacity);
                 } else
 #endif
                 cairo_stroke(cr);
@@ -599,7 +602,7 @@ void draw_implicit_rec(expression *expr, file_data *fd, cairo_t *cr, uint8_t *co
                     }
                     cairo_close_path(cr);
                     cairo_fill(cr);
-                    SET_COLOR_OPACITY(cr, color, 1);
+                    SET_COLOR_OPACITY(cr, color, stroke_opacity);
                 } else
 #endif
                 cairo_stroke(cr);
@@ -620,7 +623,7 @@ void draw_implicit_rec(expression *expr, file_data *fd, cairo_t *cr, uint8_t *co
                     }
                     cairo_close_path(cr);
                     cairo_fill(cr);
-                    SET_COLOR_OPACITY(cr, color, 1);
+                    SET_COLOR_OPACITY(cr, color, stroke_opacity);
                 } else
 #endif
                 cairo_stroke(cr);
@@ -641,7 +644,7 @@ void draw_implicit_rec(expression *expr, file_data *fd, cairo_t *cr, uint8_t *co
                     }
                     cairo_close_path(cr);
                     cairo_fill(cr);
-                    SET_COLOR_OPACITY(cr, color, 1);
+                    SET_COLOR_OPACITY(cr, color, stroke_opacity);
                 } else
 #endif
                 cairo_stroke(cr);
@@ -662,7 +665,7 @@ void draw_implicit_rec(expression *expr, file_data *fd, cairo_t *cr, uint8_t *co
                     }
                     cairo_close_path(cr);
                     cairo_fill(cr);
-                    SET_COLOR_OPACITY(cr, color, 1);
+                    SET_COLOR_OPACITY(cr, color, stroke_opacity);
                 } else
 #endif
                 cairo_stroke(cr);
