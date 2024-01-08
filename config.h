@@ -33,6 +33,8 @@
 #define SCROLL_AMOUNT 1.1
 #define TICK_SIZE 125
 
+#define CACHE_BLOCK_SIZE 256
+
 #define DEBUG_EVAL
 #define DEBUG_PLOT
 

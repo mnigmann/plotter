@@ -25,6 +25,9 @@
 #define FIND_NEAREST_UNSUPPORTED 0x01
 #define FIND_NEAREST_NOCONV 0x02
 
+#define CACHE_ENABLE 0x80000000
+#define CACHE_SIZE_MASK 0x7fffffff
+
 /*
  * Data structures used for this program
  *  * Function list that stores function blocks
@@ -67,6 +70,7 @@ typedef struct expression_s {
     struct function_s *color_pointer;       // Pointer to a function block that produces the color
     double *value;                          // Pointer to the value of the expression. Used when plotting
     uint32_t value_type;                    // Type of the last value of the expression. Used when plotting
+    uint32_t cache_size;                    // Size of the cache array (used for explicit and implicit plotting)
     char *def;                              // Pointer to char array containing definition. Freed after parsing
 } expression;
 

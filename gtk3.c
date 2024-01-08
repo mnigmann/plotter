@@ -158,6 +158,14 @@ uint32_t eval_func(double t, double *x, double *y, expression *expr, double *sta
         *y = stackpos[eval_index];
         *x = t;
     }
+    if (expr->cache_size != -1) {
+        if (expr->cache_size % CACHE_BLOCK_SIZE == 0) {
+            expr->value = realloc(expr->value, (expr->cache_size + CACHE_BLOCK_SIZE) * sizeof(double));
+        }
+        expr->value[expr->cache_size] = *x;
+        expr->value[expr->cache_size+1] = *y;
+        expr->cache_size += 2;
+    }
     nfev++;
     return type;
 }
@@ -232,7 +240,7 @@ void find_discontinuity(expression *expr, double *stackpos, double t, double x, 
 
 void draw_function_constant_ds_rec(expression *expr, file_data *fd, cairo_t *cr, uint8_t flags, double t_start, double t_end, double xi, double yi, double min_dt) {
     double x, y, xp, yp, xpp, ypp, tp, tpp, dt, ds, dsp;
-    //printf("t_end %f, t_start %f, min_dt %f, flags %02x, interval %p\n", t_end, t_start, min_dt, flags, func->inter);
+    printf("t_end %f, t_start %f, min_dt %f, flags %02x, interval %p\n", t_end, t_start, min_dt, flags, expr->func->inter);
     if (t_end - t_start < min_dt) {
         //printf("Returning due to minimum dt\n");
         return;
@@ -372,6 +380,7 @@ void draw_function_constant_ds(expression *expr, file_data *fd, uint8_t *color, 
     uint8_t flags;
     uint32_t n = (type>>8)/GET_STEP(type);
     //printf("Number of functions to be plotted: %d\n", n);
+    expr->cache_size = 0;
     for (uint32_t i=0; i < n; i++) {
         flags = 0;
         eval_index = i;
@@ -773,6 +782,15 @@ uint8_t find_nearest_point(file_data *fd, expression *expr, double x, double y, 
                 }
             }
             expr->func->oper = old_oper;
+        } else if (!(expr->flags & EXPRESSION_FIXED) && (expr->cache_size != -1)) {
+            for (uint32_t i=0; i < expr->cache_size; i+=2) {
+                dist = hypot(SCALE_XK(expr->value[i]) - x, SCALE_YK(expr->value[i+1]) - y);
+                if (dist < *mindist) {
+                    *mindist = dist;
+                    *xf = expr->value[i];
+                    *yf = expr->value[i+1];
+                }
+            }
         } else {
             return FIND_NEAREST_UNSUPPORTED;
         }

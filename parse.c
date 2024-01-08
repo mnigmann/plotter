@@ -138,6 +138,7 @@ expression new_expression(variable *var, function *func, expression **dependenci
     expr.value = NULL;
     expr.value_type = 0;
     expr.color_pointer = NULL;
+    expr.cache_size = -1;
     return expr;
 }
 
