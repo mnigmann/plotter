@@ -46,7 +46,7 @@ expression expression_list[100];
 expression *deptable[300];
 double stack[65536];
 double lstack[65536];
-char stringbuf[500];
+char stringbuf[600];
 file_data fd;
 
 uint32_t n_expr;

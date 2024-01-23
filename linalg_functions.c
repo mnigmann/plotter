@@ -26,7 +26,7 @@ uint32_t func_solve(void *f, double *stackpos) {
     alen = argtype>>8;
     st += alen;
     if (!IS_TYPE(argtype, TYPE_DOUBLE)) FAIL("ERROR: A matrix must be array of doubles\n");
-    //printf("first argument: "); print_object(argtype, stackpos);
+    //printf("first argument: "); print_object(argtype, stackpos); printf("\n");
 
     arg = arg->next_arg;
     double *b = stackpos+st;
@@ -40,6 +40,8 @@ uint32_t func_solve(void *f, double *stackpos) {
         nrhs = (int)stackpos[st];
     }
     if (blen % nrhs) FAIL("ERROR: Bad dimension for B matrix, nrhs %d, blen %d\n", nrhs, blen);
+
+    if ((alen == 0) || (blen == 0)) return TYPE_LIST;
 
     int arows = blen / nrhs;
     int acols = alen / arows;

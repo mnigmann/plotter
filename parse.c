@@ -519,13 +519,14 @@ int parse_latex_rec(char *latex, int end, function *function_list, double *stack
             printf("comma term %.*s\n", i - last_term, latex+last_term);
             
             if (n_terms > 0) {
-                // For assignments, we chain by value and not by next_arg
+                // If a term has already been found, chain it
                 printf("Chaining comma term with flags %02x\n", flags);
                 function_list[last_pos].next_arg = function_list + func_pos;
             }
             last_pos = func_pos;
             flags = 0;
             func_pos += PARSE_LATEX_REC(latex+last_term, i - last_term, function_list+func_pos);
+            *result_flags |= flags;
             last_term = i+1;
             n_terms++;
         } else break;
@@ -1127,6 +1128,7 @@ int parse_latex_rec(char *latex, int end, function *function_list, double *stack
                 last_pos = func_pos;
                 flags = 0;
                 func_pos += PARSE_LATEX_REC(latex+cmd_start+5, arg1_end - cmd_start - 11, function_list+func_pos);
+                printf("Comma or action chain: %02x\n", flags);
                 if (flags & PARSE_ACTION) {
                     shift_blocks(function_list, last_pos, func_pos-last_pos);
                     func_pos++;
@@ -1464,11 +1466,15 @@ uint8_t varncmp(char *varname, char *target, uint32_t len) {
 
 void insert_interval_functions(function *func) {
     const oper_data *oper = oper_lookup(func->oper);
-    func->inter = oper->inter;
-    if (!(func->inter)) {
+    if (!oper) {
+        printf("Operator %p not found in table\n", func);
+        return;
+    }
+    if (!(oper->inter)) {
         printf("Operator %p (%s) does not have interval function\n", func, oper->name);
         return;
     }
+    func->inter = oper->inter;
     function *arg = func->first_arg;
     while (arg) {
         insert_interval_functions(arg);
@@ -1798,6 +1804,7 @@ expression *parse_file(file_data *fd, char *stringbuf) {
             int string_size = stringpos - stringbuf;
             last_pos = func_pos;
             func_pos += parse_latex_rec(line+i, read-i, function_list+func_pos, stack, variable_list, stringbuf, &stack_size, &var_size, &string_size, &flags);
+            printf("after parsing, func_pos: %d, string_size: %d, stack_size: %d, var_size: %d\n", func_pos, string_size, stack_size, var_size);
             if ((exprpos->var) && (strcmp(exprpos->var->name, "r") == 0)) {
                 printf("Polar expression found\n");
                 shift_blocks(function_list, last_pos, func_pos-last_pos);

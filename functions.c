@@ -541,7 +541,7 @@ uint32_t func_index(void *f, double *stackpos) {
     val1 = stackpos;
     if (!(t1 & TYPE_LIST)) {
         print_object(t1, val1); printf("\n");
-        FAIL("ERROR: Cannot index a non-list\n");
+        FAIL("ERROR: Cannot index a non-list (first argument %p)\n", arg);
     }
     
     arg = arg->next_arg;
@@ -1260,8 +1260,8 @@ uint32_t func_conditional(void *f, double *stackpos) {
     double *value_ptr = NULL;
     double *result_ptr = NULL;
     double *last_mask_ptr = NULL;
-    uint32_t argtype, lasttype=0, lastlen=0, arglen, st=0, result_type=0, result_len=-1;
-    uint8_t step, result_step = 1;
+    uint32_t argtype=-1, lasttype=0, lastlen=0, arglen, st=0, result_type=0, result_len=-1;
+    uint8_t step, result_step = 1, skipped=0;
     //printf("Conditional found at %p, %p\n", fs, arg);
     // After first condition:
     // v- st
@@ -1284,16 +1284,26 @@ uint32_t func_conditional(void *f, double *stackpos) {
     // | result_3 |
 
     while (arg) {
-        argtype = arg->oper(arg, stackpos+st+lastlen);
+        skipped = 0;
+        if ((argtype == ((1<<8)|TYPE_BOOLEAN)) && (last_mask_ptr[0] == 0)) {
+            // If the previous expression was a single false boolean, then we don't actually need to evaluate
+            // This is useful especially when the branch of the conditional is an action
+            skipped = 1;
+            argtype = 1<<8;
+        }
+        else argtype = arg->oper(arg, stackpos+st+lastlen);
         arglen = argtype>>8;
         step = GET_STEP(argtype);
-        //printf("evaluating component of conditional: %08x, %08x ", argtype, result_type); print_object(argtype, stackpos+st+lastlen); printf("\n");
+        //printf("evaluating component of conditional: ");
+        //if (skipped) printf("<skipped>\n");
+        //else {printf("%08x, %08x ", argtype, result_type); print_object(argtype, stackpos+st+lastlen); printf("\n");}
         // In this case, result_len refers to the number of elements in the list,
         // not the number of doubles the list takes up
 
         // If the result length and type have not been set, set them
         if (result_len == -1) {
             result_len = arglen;
+            if (argtype & TYPE_LIST) result_type |= TYPE_LIST;
         }
         // If the existing data is not a list, then we may need to expand it
         else if ((argtype & TYPE_LIST) && !(result_type & TYPE_LIST)) {
@@ -1321,6 +1331,7 @@ uint32_t func_conditional(void *f, double *stackpos) {
             result_type |= TYPE_LIST;
             result_len = arglen;
         }
+        // Shrink the existing arrays if necessary
         if (argtype & TYPE_LIST) result_len = (arglen/step < result_len ? arglen/step : result_len);
         if ((argtype & TYPE_MASK) == TYPE_BOOLEAN) {
             // Condition was found. Thus, the previous expression was a double and lastlen will be zero.
@@ -1329,9 +1340,11 @@ uint32_t func_conditional(void *f, double *stackpos) {
             //printf("    last_mask_ptr %p (%ld)\n", last_mask_ptr, last_mask_ptr - stackpos);
         } else {
             // For the first value, set result_type
-            if ((st) && ((result_type & TYPE_MASK) != (argtype & TYPE_MASK))) FAIL("ERROR: all branches of a conditional must have the same type\n");
-            result_type |= argtype;
-            result_step = GET_STEP(result_type);
+            if (!skipped) {
+                if ((st) && ((result_type & TYPE_MASK) != (argtype & TYPE_MASK))) FAIL("ERROR: all branches of a conditional must have the same type (%p)\n", fs);
+                result_type |= argtype;
+                result_step = GET_STEP(result_type);
+            }
             value_ptr = stackpos+st+lastlen;
             if (!(argtype & TYPE_LIST)) {
                 //printf("casting, value at %p, result_len %d, step %d\n", value_ptr, result_len, step);
@@ -1387,6 +1400,8 @@ uint32_t func_conditional(void *f, double *stackpos) {
                 // Update the combined mask
                 for (int i=0; i < result_len; i++) stackpos[i] += last_mask_ptr[i%lastlen];
             }
+            // Short-circuited evaluation
+            if ((lastlen == 1) && (last_mask_ptr[0] == 1)) break;
             lastlen = 0;
             // Break if a default expression was found
             if ((lasttype & TYPE_MASK) != TYPE_BOOLEAN) break;
@@ -1771,8 +1786,9 @@ uint32_t func_color(void *f, double *stackpos) {
     return target->oper(target, stackpos);
 }
 
-#define N_OPERATORS 47
+#define N_OPERATORS 48
 const oper_data oper_list[N_OPERATORS] = {
+    {NULL, "unknown_function", NULL},
     {func_value, "func_value", interval_value},
 
     {func_div, "func_div", interval_div},
@@ -1831,5 +1847,5 @@ const oper_data *oper_lookup(uint32_t (*ptr)(void*, double*)) {
     for (int i=0; i < N_OPERATORS; i++) {
         if (oper_list[i].oper == ptr) return oper_list+i;
     }
-    return NULL;
+    return oper_list;
 }
