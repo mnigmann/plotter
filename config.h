@@ -9,6 +9,8 @@
 
 // Distance between axis and number, in pixels
 #define AXIS_DISTANCE 3
+// Maximum distance between axis and cursor when scaling axes independently
+#define AXIS_MARGIN 20
 
 #define POINT_SIZE 3
 #define MAX_POLYGON_SIZE 4

@@ -815,7 +815,7 @@ void draw_labeled_point(cairo_t *cr, double xf, double yf) {
 
 static gboolean button_press_callback (GtkWidget *event_box, GdkEventButton *event, gpointer data_pointer) {
     file_data *fd = (file_data*)(data_pointer);
-    g_print ("Clicked at %f, %f\n", event->x, event->y);
+    g_print ("Clicked at %f, %f, state %02x\n", event->x, event->y, event->state);
     expression *expression_list = fd->expression_list, *expr;
     double dist, mindist=INFINITY;
     int expr_clicked=0, index=0;
@@ -845,7 +845,12 @@ static gboolean button_press_callback (GtkWidget *event_box, GdkEventButton *eve
     }
     click_x = event->x;
     click_y = event->y;
-    click_state = 1;
+    click_state |= 0x01;
+    if ((event->state & GDK_SHIFT_MASK) && (fabs(event->x - SCALE_XK(0)) < AXIS_MARGIN)) {
+        click_state |= 0x02;
+    } else if ((event->state & GDK_SHIFT_MASK) && (fabs(event->y - SCALE_YK(0)) < AXIS_MARGIN)) {
+        click_state |= 0x04;
+    } else if (event->state & GDK_SHIFT_MASK) click_state |= 0x06;
     return TRUE;
 }
 
@@ -855,7 +860,7 @@ static gboolean button_release_callback (GtkWidget *event_box, GdkEventButton *e
     reset_overlay(fd);
     click_x = event->x;
     click_y = event->y;
-    click_state = 0;
+    click_state &= 0xf8;
     gtk_widget_queue_draw(fd->drawing_area);
     return TRUE;
 }
@@ -1153,7 +1158,7 @@ static gboolean scroll_callback (GtkWidget *event_box, GdkEventScroll *event, gp
 
 static gboolean motion_callback(GtkWidget *event_box, GdkEventMotion *event, gpointer data_pointer) {
     file_data *fd = (file_data*)(data_pointer);
-    if ((click_state) && (fd->use_overlay) && (fd->click_expr)) {
+    if ((click_state == 1) && (fd->use_overlay) && (fd->click_expr)) {
         double xf, yf, dist;
         int index;
         uint8_t status = find_nearest_point(fd, fd->click_expr, event->x, event->y, &dist, &index, &xf, &yf, 1);
@@ -1168,13 +1173,35 @@ static gboolean motion_callback(GtkWidget *event_box, GdkEventMotion *event, gpo
         if (!status) draw_labeled_point(cr, xf, yf);
         cairo_destroy(cr);
         gtk_widget_queue_draw(fd->drawing_area);
-    } else if (click_state) {
-        double dx = (event->x - click_x)/xscale;
-        double dy = (click_y - event->y)/yscale;
-        window_x0 -= dx; window_x1 -= dx; window_y0 -= dy; window_y1 -= dy;
+    } else if (click_state & 0x01) {
+        double center_x = 0, center_y = 0;
+        if (window_x0 > 0) center_x = window_x0;
+        if (window_x1 < 0) center_x = window_x1;
+        if (window_y0 > 0) center_y = window_y0;
+        if (window_y1 < 0) center_y = window_y1;
+        if (event->state & GDK_SHIFT_MASK) {
+            // Rescale uniformly
+            // Scale factor is r_new / r_old
+            if (!(click_state & 0x02)) click_y = event->y;
+            if (!(click_state & 0x04)) click_x = event->x;
+            double scale = hypot(SCALE_XK(center_x) - event->x, SCALE_YK(center_y) - event->y)/hypot(SCALE_XK(center_x) - click_x, SCALE_YK(center_y) - click_y);
+            if (click_state & 0x04) {
+                window_x0 = center_x + (window_x0 - center_x)/scale;
+                window_x1 = center_x + (window_x1 - center_x)/scale;
+            }
+            if (click_state & 0x02) {
+                window_y0 = center_y + (window_y0 - center_y)/scale;
+                window_y1 = center_y + (window_y1 - center_y)/scale;
+            }
+        } else {
+            // Shift key is not pressed
+            double dx = (event->x - click_x)/xscale;
+            double dy = (click_y - event->y)/yscale;
+            window_x0 -= dx; window_x1 -= dx; window_y0 -= dy; window_y1 -= dy;
+            uint8_t color[4] = {255, 255, 255, 0};
+        }
         click_x = event->x;
         click_y = event->y;
-        uint8_t color[4] = {255, 255, 255, 0};
         redraw_all(fd);
         gtk_widget_queue_draw(fd->drawing_area);
     }
@@ -1192,7 +1219,7 @@ static gboolean timeout_callback(gpointer data_pointer) {
 
 static gboolean keypress_callback(GtkWidget *widget, GdkEventKey *event, gpointer data_pointer) {
     file_data *fd = (file_data*)data_pointer;
-    printf("Event is %d\n", event->keyval);
+    printf("Event is %d, state %08x\n", event->keyval, event->state);
     if (event->keyval == 's') {
         run_ticker = 1;
         if (ticker_target >= 0) g_timeout_add(ticker_step, timeout_callback, data_pointer);
@@ -1215,23 +1242,6 @@ static gboolean keypress_callback(GtkWidget *widget, GdkEventKey *event, gpointe
             
     return TRUE;
 }
-
-/*void eval_func(double t, double *x, double *y) {
-    double e = exp(t);
-    *x = cos(e)/e;
-    *y = sin(e)/e;
-}*/
-
-/*void eval_func(double t, double *x, double *y) {
-    *x = 2*cos(t) + 5*cos(2*t/3);
-    *y = 2*sin(t) + 5*sin(2*t/3);
-}*/
-
-/*void eval_func(double t, double *x, double *y) {
-    nfev++;
-    *x = 2*(sin(5*t) - sin(3*t));
-    *y = 2*sin(cos(7*t) + cos(t));
-}*/
 
 
 static void activate (GtkApplication *app, gpointer user_data) {
