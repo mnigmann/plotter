@@ -2,6 +2,8 @@
 #include "parse.h"
 #include "config.h"
 #include "intervals.h"
+#include "linalg_functions.h"
+#include "linalg_intervals.h"
 #include <stdint.h>
 #include <math.h>
 #include <stdio.h>
@@ -1786,7 +1788,7 @@ uint32_t func_color(void *f, double *stackpos) {
     return target->oper(target, stackpos);
 }
 
-#define N_OPERATORS 48
+#define N_OPERATORS 49
 const oper_data oper_list[N_OPERATORS] = {
     {NULL, "unknown_function", NULL},
     {func_value, "func_value", interval_value},
@@ -1809,7 +1811,7 @@ const oper_data oper_list[N_OPERATORS] = {
     {func_exponentiate, "func_exponentiate", interval_exponentiate},
     {func_user_defined, "func_user_defined", interval_user_defined},
 
-    {func_list, "func_list", NULL},
+    {func_list, "func_list", interval_list},
     {func_index, "func_index", NULL},
     {func_point, "func_point", interval_point},
     {func_polygon, "func_polygon", NULL},
@@ -1837,6 +1839,8 @@ const oper_data oper_list[N_OPERATORS] = {
     {func_length, "func_length", NULL},
     {func_integrate, "func_integrate", NULL},
     {func_integrate_gsl, "func_integrate_gsl", interval_integrate_gsl},
+    
+    {func_det, "func_det", interval_det},
 
     {func_convert_polar, "func_convert_polar", NULL},
     {func_onkeypress, "func_onkeypress", NULL},

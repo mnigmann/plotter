@@ -5,7 +5,10 @@
 #define HEIGHT 500
 #define COLOR_AXES 64
 #define COLOR_MAJOR_GRID 160
-#define COLOR_MINOR_GRID 200
+#define COLOR_MINOR_GRID 220
+
+// Distance between axis and number, in pixels
+#define AXIS_DISTANCE 3
 
 #define POINT_SIZE 3
 #define MAX_POLYGON_SIZE 4

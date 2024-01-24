@@ -630,6 +630,56 @@ uint32_t interval_exp(void *f, double *hstackpos, double *lstackpos) {
     return interval_general_one_arg(f, hstackpos, lstackpos, miexp);
 }
 
+uint32_t interval_list(void *f, double *hstackpos, double *lstackpos) {
+    function *fs = (function*)f;
+    function *arg = fs->first_arg;
+    if (!arg) return TYPE_LIST;
+    uint8_t type = 0xff;
+    uint32_t argtype;
+    uint32_t arglen;
+    uint32_t st=0;
+    uint8_t ellipsis = 0;
+    /*do {
+        argtype = arg->oper(arg, stackpos+st);
+        if ((argtype == TYPE_ELLIPSIS) && ((type & TYPE_MASK) == TYPE_DOUBLE) && (arg->next_arg)) {
+            ellipsis = 2;
+        } else {
+            if (argtype & TYPE_LIST) FAIL("ERROR: Cannot store a list inside a list\n");
+            if ((type != 0xff) && ((argtype&0xff) != type)) FAIL("ERROR: All list elements must have the same type\n");
+            st += argtype>>8;
+            type = argtype & 0xff;
+        }
+        if (ellipsis == 2) ellipsis--;
+        else if (ellipsis) {
+            ellipsis = 0;
+            if (stackpos[st-1] != stackpos[st-2]) {
+                double end = stackpos[st-1];
+                double step = (st > 2 ? stackpos[st-2]-stackpos[st-3] : (stackpos[st-2] > end ? -1 : 1));
+                if (step && ((step > 0) ^ (stackpos[st-1] < stackpos[st-2]))) {
+                    st--;
+                    for (double val=stackpos[st-1]; val < end; st++) {
+                        val += step;
+                        stackpos[st] = val;
+                    }
+                }
+            }
+            // If the start and end values are equal, delete one so ony one of them
+            // occurs in the result. Thus, \left[1,...,1\right] evaluates to [1]
+            else st--;
+        }
+        arg = arg->next_arg;
+    } while (arg);*/
+    while (arg) {
+        argtype = arg->inter(arg, hstackpos+st, lstackpos+st);
+        if (argtype & TYPE_LIST) FAIL("ERROR: Cannot store a list inside a list\n");
+        if ((type != 0xff) && ((argtype&0xff) != type)) FAIL("ERROR: All list elements must have the same type\n");
+        st += argtype>>8;
+        type = argtype & 0xff;
+        arg = arg->next_arg;
+    }
+    return (st<<8) | type | TYPE_LIST;
+}
+
 uint32_t interval_point(void *f, double *hstackpos, double *lstackpos) {
     function *fs = (function*)f;
     function *arg = fs->first_arg;

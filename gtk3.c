@@ -240,7 +240,7 @@ void find_discontinuity(expression *expr, double *stackpos, double t, double x, 
 
 void draw_function_constant_ds_rec(expression *expr, file_data *fd, cairo_t *cr, uint8_t flags, double t_start, double t_end, double xi, double yi, double min_dt) {
     double x, y, xp, yp, xpp, ypp, tp, tpp, dt, ds, dsp;
-    printf("t_end %f, t_start %f, min_dt %f, flags %02x, interval %p\n", t_end, t_start, min_dt, flags, expr->func->inter);
+    //printf("t_end %f, t_start %f, min_dt %f, flags %02x, interval %p\n", t_end, t_start, min_dt, flags, expr->func->inter);
     if (t_end - t_start < min_dt) {
         //printf("Returning due to minimum dt\n");
         return;
@@ -872,40 +872,85 @@ void redraw_all(file_data *fd) {
     xscale = 1.0*WIDTH/(window_x1 - window_x0);
     yscale = 1.0*HEIGHT/(window_y1 - window_y0);
     t1 = clock();
-    
-    int16_t logx = round(3*log10(TICK_SIZE / xscale));
-    int8_t basex = logx%3;
-    basex = (basex<0 ? 3+basex : basex);
-    int16_t decadex = (logx - basex)/3;
-    basex++;
-    if (basex == 3) basex = 5;
+    cairo_text_extents_t extents;
+    char temp[50];
+    int16_t log, decade;
+    int8_t base;
+    double major_xticksize, minor_xticksize, major_yticksize, minor_yticksize;
     clock_t t3, t4;
-    double ticksize = basex;
-    int64_t xk;
-    while (decadex > 0) {decadex--; ticksize *= 10;}
-    while (decadex < 0) {decadex++; ticksize /= 10;}
-    double x0_scaled = ticksize*floor(window_x0/ticksize);
-    for (double tick=x0_scaled; tick <= window_x1; tick+=ticksize) {
+
+    log = round(3*log10(TICK_SIZE / xscale));
+    base = log%3;
+    base = (base<0 ? 3+base : base);
+    decade = (log - base)/3;
+    int16_t digitsx = (decade < 0 ? -decade : 0);
+    base++;
+    if (base == 3) base = 5;
+    major_xticksize = base;
+    while (decade > 0) {decade--; major_xticksize *= 10;}
+    while (decade < 0) {decade++; major_xticksize /= 10;}
+    if (base == 2) minor_xticksize = major_xticksize / 2;
+    else minor_xticksize = major_xticksize / 5;
+
+    log = round(3*log10(TICK_SIZE / yscale));
+    base = log%3;
+    base = (base<0 ? 3+base : base);
+    decade = (log - base)/3;
+    int16_t digitsy = (decade < 0 ? -decade : 0);
+    base++;
+    if (base == 3) base = 5;
+    major_yticksize = base;
+    while (decade > 0) {decade--; major_yticksize *= 10;}
+    while (decade < 0) {decade++; major_yticksize /= 10;}
+    if (base == 2) minor_yticksize = major_yticksize / 2;
+    else minor_yticksize = major_yticksize / 5;
+    
+    cairo_set_source_rgb(cr, COLOR_MINOR_GRID/256.0, COLOR_MINOR_GRID/256.0, COLOR_MINOR_GRID/256.0);
+    double x0_scaled = minor_xticksize*floor(window_x0/minor_xticksize);
+    for (double tick=x0_scaled; tick <= window_x1; tick+=minor_xticksize) {
         cairo_move_to(cr, SCALE_XK(tick), 0);
         cairo_line_to(cr, SCALE_XK(tick), HEIGHT);
     }
-    
-    int16_t logy = round(3*log10(TICK_SIZE / yscale));
-    int8_t basey = logy%3;
-    basey = (basey<0 ? 3+basey : basey);
-    int16_t decadey = (logy - basey)/3;
-    basey++;
-    if (basey == 3) basey = 5;
-    ticksize = basey;
-    while (decadey > 0) {decadey--; ticksize *= 10;}
-    while (decadey < 0) {decadey++; ticksize /= 10;}
-    double y0_scaled = ticksize*floor(window_y0/ticksize);
-    for (double tick=y0_scaled; tick <= window_y1; tick+=ticksize) {
+    double y0_scaled = minor_yticksize*floor(window_y0/minor_yticksize);
+    for (double tick=y0_scaled; tick <= window_y1; tick+=minor_yticksize) {
         cairo_move_to(cr, 0, SCALE_YK(tick));
         cairo_line_to(cr, WIDTH, SCALE_YK(tick));
     }
-
     cairo_stroke(cr);
+    
+    cairo_set_source_rgb(cr, COLOR_MAJOR_GRID/256.0, COLOR_MAJOR_GRID/256.0, COLOR_MAJOR_GRID/256.0);
+    x0_scaled = major_xticksize*floor(window_x0/major_xticksize);
+    for (double tick=x0_scaled; tick <= window_x1; tick+=major_xticksize) {
+        cairo_move_to(cr, SCALE_XK(tick), 0);
+        cairo_line_to(cr, SCALE_XK(tick), HEIGHT);
+
+        cairo_select_font_face(cr, "Verdana", CAIRO_FONT_SLANT_NORMAL, CAIRO_FONT_WEIGHT_NORMAL);
+        cairo_set_font_size(cr, 12);
+        sprintf(temp, "%.*f", digitsx, tick);
+        cairo_text_extents(cr, temp, &extents);
+        double ypos = SCALE_YK(0)+extents.height+AXIS_DISTANCE;
+        if (ypos >= HEIGHT) ypos = HEIGHT - AXIS_DISTANCE;
+        else if (window_y1 <= 0) ypos = extents.height + AXIS_DISTANCE;
+        cairo_move_to(cr, SCALE_XK(tick)-extents.width/2, ypos);
+        cairo_show_text(cr, temp);
+    }
+    y0_scaled = major_yticksize*floor(window_y0/major_yticksize);
+    for (double tick=y0_scaled; tick <= window_y1; tick+=major_yticksize) {
+        cairo_move_to(cr, 0, SCALE_YK(tick));
+        cairo_line_to(cr, WIDTH, SCALE_YK(tick));
+
+        cairo_select_font_face(cr, "Verdana", CAIRO_FONT_SLANT_NORMAL, CAIRO_FONT_WEIGHT_NORMAL);
+        cairo_set_font_size(cr, 12);
+        sprintf(temp, "%.*f", digitsy, tick);
+        cairo_text_extents(cr, temp, &extents);
+        double xpos = SCALE_XK(0)-extents.width-AXIS_DISTANCE;
+        if (xpos < 0) xpos = AXIS_DISTANCE;
+        else if (window_x1 <= 0) xpos = WIDTH-extents.width-AXIS_DISTANCE;
+        cairo_move_to(cr, xpos, SCALE_YK(tick)+extents.height/2);
+        cairo_show_text(cr, temp);
+    }
+    cairo_stroke(cr);
+    
     // Draw axes gridlines
     cairo_set_source_rgb(cr, COLOR_AXES/256.0, COLOR_AXES/256.0, COLOR_AXES/256.0);
     if ((window_x0 <= 0) && (0 < window_x1)) {
