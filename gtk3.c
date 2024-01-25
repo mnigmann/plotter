@@ -241,14 +241,61 @@ void find_discontinuity(expression *expr, double *stackpos, double t, double x, 
 void draw_function_constant_ds_rec(expression *expr, file_data *fd, cairo_t *cr, uint8_t flags, double t_start, double t_end, double xi, double yi, double min_dt) {
     double x, y, xp, yp, xpp, ypp, tp, tpp, dt, ds, dsp;
     //printf("t_end %f, t_start %f, min_dt %f, flags %02x, interval %p\n", t_end, t_start, min_dt, flags, expr->func->inter);
-    if (t_end - t_start < min_dt) {
-        //printf("Returning due to minimum dt\n");
-        return;
-    }
     double *stackpos = fd->stack + fd->n_stack;
     double *lstackpos = fd->lstack;
+    if (t_end - t_start < min_dt) {
+        // Final check if there could be another line to draw.
+        // The two endpoints must both be off-screen, but not on the 
+        // same side.
+        if ((flags & 0x0f) && (flags & 0xf0) && !((flags>>4) & flags)) {
+            //printf("Extra line needed between %f and %f, flags %02x\n", t_start, t_end, flags);
+            eval_func(t_start, &xp, &yp, expr, stackpos);
+            eval_func(t_end, &x, &y, expr, stackpos);
+            // Truncate the line to fit in the screen. A line must cross
+            // at least two distinct edges
+            // Check t_start (xp, yp)
+            double a;
+            if (flags & 0x0c) {
+                a = (flags & 0x08) ? window_y1 : window_y0;
+                xp += (a - yp) * (x - xp) / (y - yp);
+                yp = a;
+                flags &= 0xfc;
+                if (xp < window_x0) flags |= 0x01;
+                if (xp > window_x1) flags |= 0x02;
+            }
+            // Check t_end (x, y)
+            if (flags & 0xc0) {
+                a = (flags & 0x80) ? window_y1 : window_y0;
+                x += (a - y) * (x - xp) / (y - yp);
+                y = a;
+                flags &= 0xcf;
+                if (xp < window_x0) flags |= 0x10;
+                if (xp > window_x1) flags |= 0x20;
+            }
+            if (!((flags >> 4) & flags) && flags) {
+                if (flags & 0x03) {
+                    a = (flags & 0x01) ? window_x0 : window_x1;
+                    yp += (a - xp) * (y - yp) / (x - xp);
+                    xp = a;
+                    flags &= 0xf0;
+                }
+                if (flags & 0x30) {
+                    a = (flags & 0x10) ? window_x0 : window_x1;
+                    y += (a - xp) * (y - yp) / (x - xp);
+                    x = a;
+                    flags &= 0x0f;
+                }
+            }
+            cairo_move_to(cr, SCALE_XK(xp), SCALE_YK(yp));
+            cairo_line_to(cr, SCALE_XK(x), SCALE_YK(y));
+            //printf("Line between (%f, %f) and (%f, %f)\n", xp, yp, x, y);
+            cairo_stroke(cr);
+        }
+        //printf("Returning due to minimum dt\n");
+        if ((flags & 0x0f) && (flags & 0xf0)) return;
+    }
     //printf("recursive step from %f to %f, flags %02x\n", t_start, t_end, flags);
-    if (flags & 0x01) {
+    if (!(flags & 0x0f)) {
         // If the lower point is in-bounds, start from there and go up
         eval_func(t_start, &xp, &yp, expr, stackpos);
         cairo_move_to(cr, SCALE_XK(xp), SCALE_YK(yp));
@@ -285,13 +332,23 @@ void draw_function_constant_ds_rec(expression *expr, file_data *fd, cairo_t *cr,
             }
             if (!IN_BOUNDS(x, y)) {
                 // Leaving the bounds, so iterate on [t, t_end]
+                flags &= 0xf0;
+                if (x < window_x0) flags |= 0x01;
+                if (x > window_x1) flags |= 0x02;
+                if (y < window_y0) flags |= 0x04;
+                if (y > window_y1) flags |= 0x08;
                 cairo_stroke(cr);
-                draw_function_constant_ds_rec(expr, fd, cr, (flags & 0x02), t_start, t_end, x, y, min_dt);
+                draw_function_constant_ds_rec(expr, fd, cr, flags, t_start, t_end, x, y, min_dt);
                 break;
             }
         }
+        eval_func(t_end, &x, &y, expr, stackpos);
+        if ((x == x) && (y == y)) {
+            cairo_line_to(cr, SCALE_XK(x), SCALE_YK(y));
+            step++;
+        }
         cairo_stroke(cr);
-    } else if (flags & 0x02) {
+    } else if (!(flags & 0xf0)) {
         // If the upper point is in-bounds, start from there and go down
         eval_func(t_end, &xp, &yp, expr, stackpos);
         cairo_move_to(cr, SCALE_XK(xp), SCALE_YK(yp));
@@ -319,10 +376,19 @@ void draw_function_constant_ds_rec(expression *expr, file_data *fd, cairo_t *cr,
             }
             if (!IN_BOUNDS(x, y)) {
                 // Leaving the bounds, so iterate on [t, t_end]
+                flags &= 0x0f;
+                if (x < window_x0) flags |= 0x10;
+                if (x > window_x1) flags |= 0x20;
+                if (y < window_y0) flags |= 0x40;
+                if (y > window_y1) flags |= 0x80;
                 cairo_stroke(cr);
-                draw_function_constant_ds_rec(expr, fd, cr, (flags & 0x01), t_start, t_end, x, y, min_dt);
+                draw_function_constant_ds_rec(expr, fd, cr, flags, t_start, t_end, x, y, min_dt);
                 break;
             }
+        }
+        eval_func(t_start, &x, &y, expr, stackpos);
+        if ((x == x) && (y == y)) {
+            cairo_line_to(cr, SCALE_XK(x), SCALE_YK(y));
         }
         cairo_stroke(cr);
     } else if (expr->func->inter) {
@@ -335,30 +401,31 @@ void draw_function_constant_ds_rec(expression *expr, file_data *fd, cairo_t *cr,
         eval_func(t_avg, &x, &y, expr, stackpos);
         if (hypot((x - xi)*xscale, (y - yi)*yscale) < PLOT_MAX_ARC_LENGTH) return;
         //printf("Neither point in bounds on interval %f, %f -> (%f, %f), (%f, %f), %d\n", t_start, t_end, x, y, xi, yi, IN_BOUNDS(x, y));
-        if (IN_BOUNDS(x, y)) {
-            // [t_start, t_avg]
-            draw_function_constant_ds_rec(expr, fd, cr, (flags & 0x01) | 0x02, t_start, t_avg, x, y, min_dt);
-            // [t_avg, t_end]
-            draw_function_constant_ds_rec(expr, fd, cr, (flags & 0x02) | 0x01, t_avg, t_end, x, y, min_dt);
-        } else {
-            draw_function_constant_ds_rec(expr, fd, cr, (flags & 0x01), t_start, t_avg, x, y, min_dt);
-            draw_function_constant_ds_rec(expr, fd, cr, (flags & 0x02), t_avg, t_end, x, y, min_dt);
-        }
+        uint8_t tflags = 0;
+        if (x < window_x0) tflags |= 0x01;
+        if (x > window_x1) tflags |= 0x02;
+        if (y < window_y0) tflags |= 0x04;
+        if (y > window_y1) tflags |= 0x08;
+
+        // [t_start, t_avg]
+        draw_function_constant_ds_rec(expr, fd, cr, (flags & 0x0f) | (tflags << 4), t_start, t_avg, x, y, min_dt);
+        // [t_avg, t_end]
+        draw_function_constant_ds_rec(expr, fd, cr, (flags & 0xf0) | (tflags), t_avg, t_end, x, y, min_dt);
     } else {
         // If neither point is in-bounds, subdivide and iterate
         double t_avg = (t_end + t_start)/2;
         eval_func(t_avg, &x, &y, expr, stackpos);
         if (hypot((x - xi)*xscale, (y - yi)*yscale) < PLOT_MAX_ARC_LENGTH) return;
         //printf("Neither point in bounds on interval %f, %f -> (%f, %f), (%f, %f), %d\n", t_start, t_end, x, y, xi, yi, IN_BOUNDS(x, y));
-        if (IN_BOUNDS(x, y)) {
-            // [t_start, t_avg]
-            draw_function_constant_ds_rec(expr, fd, cr, (flags & 0x01) | 0x02, t_start, t_avg, x, y, min_dt);
-            // [t_avg, t_end]
-            draw_function_constant_ds_rec(expr, fd, cr, (flags & 0x02) | 0x01, t_avg, t_end, x, y, min_dt);
-        } else {
-            draw_function_constant_ds_rec(expr, fd, cr, (flags & 0x01), t_start, t_avg, x, y, min_dt);
-            draw_function_constant_ds_rec(expr, fd, cr, (flags & 0x02), t_avg, t_end, x, y, min_dt);
-        }
+        uint8_t tflags = 0;
+        if (x < window_x0) tflags |= 0x01;
+        if (x > window_x1) tflags |= 0x02;
+        if (y < window_y0) tflags |= 0x04;
+        if (y > window_y1) tflags |= 0x08;
+        // [t_start, t_avg]
+        draw_function_constant_ds_rec(expr, fd, cr, (flags & 0x0f) | (tflags << 4), t_start, t_avg, x, y, min_dt);
+        // [t_avg, t_end]
+        draw_function_constant_ds_rec(expr, fd, cr, (flags & 0xf0) | (tflags), t_avg, t_end, x, y, min_dt);
     }
 }
 
@@ -385,9 +452,15 @@ void draw_function_constant_ds(expression *expr, file_data *fd, uint8_t *color, 
         flags = 0;
         eval_index = i;
         eval_func(t, &xp, &yp, expr, stackpos);
-        if (IN_BOUNDS(xp, yp)) flags |= 0x01;
+        if (xp < window_x0) flags |= 0x01;
+        if (xp > window_x1) flags |= 0x02;
+        if (yp < window_y0) flags |= 0x04;
+        if (yp > window_y1) flags |= 0x08;
         eval_func(t_end, &x, &y, expr, stackpos);
-        if (IN_BOUNDS(x, y)) flags |= 0x02;
+        if (x < window_x0) flags |= 0x10;
+        if (x > window_x1) flags |= 0x20;
+        if (y < window_y0) flags |= 0x40;
+        if (y > window_y1) flags |= 0x80;
         //printf("Initial values: (%f, %f) and (%f, %f), flags %02x\n", x, y, xp, yp, flags);
         draw_function_constant_ds_rec(expr, fd, cr, flags, t, t_end, xp, yp, min_dt);
     }
