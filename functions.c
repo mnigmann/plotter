@@ -1287,7 +1287,7 @@ uint32_t func_conditional(void *f, double *stackpos) {
 
     while (arg) {
         skipped = 0;
-        if ((argtype == ((1<<8)|TYPE_BOOLEAN)) && (last_mask_ptr[0] == 0)) {
+        if ((argtype == ((1<<8)|TYPE_BOOLEAN)) && (last_mask_ptr[0] == 0) && (arg->oper == func_assign)) {
             // If the previous expression was a single false boolean, then we don't actually need to evaluate
             // This is useful especially when the branch of the conditional is an action
             skipped = 1;

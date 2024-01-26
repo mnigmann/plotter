@@ -232,8 +232,10 @@ void find_discontinuity(expression *expr, double *stackpos, double t, double x, 
             // the range [tc, tp]
             t = tc; x = xc; y = yc;
         }
-        //printf("    iterated discontinuity %f -> (%f, %f) and %f -> (%f, %f)\n", tp, xp, yp, t, x, y);
+        //printf("        iterated discontinuity %f -> (%f, %f) and %f -> (%f, %f)\n", tp, xp, yp, t, x, y);
     }
+    //printf("    function is (%f, %f)\n", xp, yp);
+    //printf("    broken to (%f, %f)\n", x, y);
     cairo_line_to(cr, SCALE_XK(xp), SCALE_YK(yp));
     cairo_move_to(cr, SCALE_XK(x), SCALE_YK(y));
 }
@@ -312,6 +314,7 @@ void draw_function_constant_ds_rec(expression *expr, file_data *fd, cairo_t *cr,
         uint32_t step = 0;
         while (t_start < t_end) {
             eval_func(t_start, &x, &y, expr, stackpos);
+            //printf("    function is (%f, %f) at %f\n", x, y, t_start);
             if ((x == x) && (y == y)) {
                 ds = hypot((x-xp)*xscale, (y-yp)*yscale);
                 dt = PLOT_MAX_ARC_LENGTH*dt/ds;
@@ -337,16 +340,17 @@ void draw_function_constant_ds_rec(expression *expr, file_data *fd, cairo_t *cr,
                 if (x > window_x1) flags |= 0x02;
                 if (y < window_y0) flags |= 0x04;
                 if (y > window_y1) flags |= 0x08;
+                if (!((x == x) && (y == y))) flags |= 0x0f;
                 cairo_stroke(cr);
                 draw_function_constant_ds_rec(expr, fd, cr, flags, t_start, t_end, x, y, min_dt);
                 break;
             }
         }
-        eval_func(t_end, &x, &y, expr, stackpos);
+        /*eval_func(t_end, &x, &y, expr, stackpos);
         if ((x == x) && (y == y)) {
             cairo_line_to(cr, SCALE_XK(x), SCALE_YK(y));
             step++;
-        }
+        }*/
         cairo_stroke(cr);
     } else if (!(flags & 0xf0)) {
         // If the upper point is in-bounds, start from there and go down
@@ -363,6 +367,7 @@ void draw_function_constant_ds_rec(expression *expr, file_data *fd, cairo_t *cr,
         t_end -= dt;
         while (t_end > t_start) {
             eval_func(t_end, &x, &y, expr, stackpos);
+            //printf("    function is (%f, %f) at %f\n", x, y, t_start);
             if ((x == x) && (y == y)) {
                 ds = hypot((x-xp)*xscale, (y-yp)*yscale);
                 dt = PLOT_MAX_ARC_LENGTH*dt/ds;
@@ -381,15 +386,16 @@ void draw_function_constant_ds_rec(expression *expr, file_data *fd, cairo_t *cr,
                 if (x > window_x1) flags |= 0x20;
                 if (y < window_y0) flags |= 0x40;
                 if (y > window_y1) flags |= 0x80;
+                if (!((x == x) && (y == y))) flags |= 0xf0;
                 cairo_stroke(cr);
                 draw_function_constant_ds_rec(expr, fd, cr, flags, t_start, t_end, x, y, min_dt);
                 break;
             }
         }
-        eval_func(t_start, &x, &y, expr, stackpos);
+        /*eval_func(t_start, &x, &y, expr, stackpos);
         if ((x == x) && (y == y)) {
             cairo_line_to(cr, SCALE_XK(x), SCALE_YK(y));
-        }
+        }*/
         cairo_stroke(cr);
     } else if (expr->func->inter) {
         double tempdata[2] = {t_start, t_end};
@@ -456,11 +462,13 @@ void draw_function_constant_ds(expression *expr, file_data *fd, uint8_t *color, 
         if (xp > window_x1) flags |= 0x02;
         if (yp < window_y0) flags |= 0x04;
         if (yp > window_y1) flags |= 0x08;
+        if (!((xp == xp) && (yp == yp))) flags |= 0x0f;
         eval_func(t_end, &x, &y, expr, stackpos);
         if (x < window_x0) flags |= 0x10;
         if (x > window_x1) flags |= 0x20;
         if (y < window_y0) flags |= 0x40;
         if (y > window_y1) flags |= 0x80;
+        if (!((x == x) && (y == y))) flags |= 0xf0;
         //printf("Initial values: (%f, %f) and (%f, %f), flags %02x\n", x, y, xp, yp, flags);
         draw_function_constant_ds_rec(expr, fd, cr, flags, t, t_end, xp, yp, min_dt);
     }
