@@ -3,6 +3,7 @@
 #include <math.h>
 #include <time.h>
 #include <string.h>
+#include <signal.h>
 #include "parse.h"
 #include "functions.h"
 #include "linalg_functions.h"
@@ -1177,6 +1178,7 @@ void run_action(file_data *fd, function *action) {
         if ((expr->var) && (expr->var->new_pointer)) {
             printf("expression %p (offset %ld) has changed, expr->var %p\n", expr, expr - (fd->expression_list) + 1, expr->var);
             if (!from) from = expr;
+            if ((((expr->var->type)>>8) != 0) && (expr->var->pointer)) free(expr->var->pointer);
             expr->var->pointer = expr->var->new_pointer;
             expr->var->type = expr->var->new_type;
             expr->var->new_pointer = NULL;
@@ -1355,7 +1357,27 @@ static void activate (GtkApplication *app, gpointer user_data) {
     gtk_widget_show_all(window);
 }
 
+void terminate(int sig) {
+    // Deallocate any memory
+    printf("Closing\n");
+    variable *variable_list = fd.variable_list;
+    function *function_list = fd.function_list;
+    // Free memory allocated to variables
+    for (int i=4; i < fd.n_var; i++) {
+        if ((variable_list[i].pointer) && ((variable_list[i].type>>8) != 0) && !(variable_list[i].flags & (VARIABLE_ARGUMENT | VARIABLE_FUNCTION | VARIABLE_ACTION))) {
+            free(variable_list[i].pointer);
+        }
+    }
+    // Free memory allocated for integration data
+    for (int i=0; i < fd.n_func; i++) {
+        if ((function_list[i].oper == func_integrate_gsl) && (function_list[i].value)) free(function_list[i].value);
+    }
+    exit(0);
+}
+
 int main (int argc, char **argv) {
+    signal(SIGINT, terminate);
+
     memset(variable_list, 0, 10*sizeof(variable));
     memset(expression_list, 0, 10*sizeof(expression));
     printf("First stack positions %p, %p\n", stack, stack+1);
@@ -1404,6 +1426,8 @@ int main (int argc, char **argv) {
     for (int i=4; i < argc; i++) argv[i-3] = argv[i];
     status = g_application_run(G_APPLICATION (app), argc-3, argv);
     g_object_unref (app);
+
+    terminate(0);
 
     return status;
 }

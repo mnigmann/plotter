@@ -745,6 +745,7 @@ uint32_t func_rgb(void *f, double *stackpos) {
         stackpos[3*i+1] = temp[g + i%gl];
         stackpos[3*i+2] = temp[b + i%bl];
     }
+    free(temp);
     return ((3*result_len)<<8) | (result_type & TYPE_LIST) | TYPE_COLOR;
 }
 
@@ -838,6 +839,7 @@ uint32_t func_for(void *f, double *stackpos) {
             else break;
         }
     }
+    for (i=0; i < n_args; i++) first_var[i].pointer = 0;
     for (i=input_len; i < st; i++) stackpos[i-input_len] = stackpos[i]*SIGN_BIT(fs);
     
     return ((st - input_len)<<8) | (0xff&argtype) | TYPE_LIST;
@@ -1121,6 +1123,7 @@ uint32_t func_sum(void *f, double *stackpos) {
         for (i=0; i < result_length; i++) stackpos[i] = stackpos[st+i]*SIGN_BIT(fs);
         //printf("sum is %e\n", stackpos[0]);
     }
+    varptr->pointer = 0;
     return (result_length<<8) | result_type;
 }
 
@@ -1176,6 +1179,7 @@ uint32_t func_prod(void *f, double *stackpos) {
             multiply_in_place(stackpos+st, stackpos+st+result_length, &result_type, &result_length, t_expr);
         }
     }
+    varptr->pointer = 0;
     for (int j=0; j < result_length; j++) stackpos[j] = stackpos[st+j]*SIGN_BIT(fs);
     //printf("product is %e\n", stackpos[0]);
     fs->value_type = (result_length<<8) | result_type;
@@ -1544,6 +1548,7 @@ double integrate_func(double x, void *params) {
     var->pointer = &x;
     var->type = 1<<8;
     expr->oper(expr, stackpos);
+    var->pointer = 0;
     return stackpos[0];
 }
 
@@ -1642,117 +1647,6 @@ double integrate_rec(function *func, double *stackpos, double *var, double lbv, 
     return result;
 }
 
-uint32_t func_integrate(void *f, double *stackpos) {
-    function *fs = (function*)f;
-    function *var = fs->first_arg;
-    function *lb = var->next_arg;
-    function *ub = lb->next_arg;
-    function *expr = ub->next_arg;
-
-    //printf("Integrating %p, variable %p, interval function is %p\n", expr, var->value, expr->inter);
-    lb->oper(lb, stackpos);
-    double lbv = stackpos[0];
-    ub->oper(ub, stackpos);
-    double ubv = stackpos[0];
-    if (lbv == ubv) {
-        // Null case is not cached
-        stackpos[0] = 0;
-        return 1<<8;
-    }
-    double xpos = 0;
-    double y, yp;
-    double result = 0;
-    uint8_t negate = 0;
-    if (lbv > ubv) {
-        negate = 1;
-        double t = lbv;
-        lbv = ubv;
-        ubv = t;
-    }
-    double value = lbv;
-    ((variable*)(var->value))->pointer = &value;
-    ((variable*)(var->value))->type = 1<<8;
-    if (ubv - lbv <= INTEGRATE_DX) {
-        expr->oper(expr, stackpos);
-        value = ubv;
-        expr->oper(expr, stackpos+1);
-        stackpos[0] = (ubv - lbv)*(stackpos[0] + stackpos[1])/2;
-        if (negate) stackpos[0] *= -1;
-        return 1<<8;
-    }
-    if (fs->value) {
-        uint32_t size = fs->value_type>>8;
-        double *value_buf = fs->value;
-        //printf("Cache found, previous range from %f to %f, current from %f to %f\n", value_buf[0], value_buf[size-2], lbv, ubv);
-        if ((lbv >= value_buf[0]) && (ubv <= value_buf[size-2])) {
-            uint32_t start, end;
-            for (uint32_t i=0; i < size; i+=2) {
-                if (value_buf[i] > lbv) {
-                    start = i;
-                    break;
-                }
-            }
-            for (uint32_t i=size-2; i > 0; i-=2) {
-                if (value_buf[i] < ubv) {
-                    end = i;
-                    break;
-                }
-            }
-            for (uint32_t i=start; i < end; i+=2) {
-                result += INTEGRATE_DX*(value_buf[i+1] + value_buf[i+3])/2;
-            }
-            //printf("previous sum %f\n", result);
-            value = lbv;
-            expr->oper(expr, stackpos);
-            result += (value_buf[start] - lbv)*(value_buf[start+1] + stackpos[0])/2;
-            value = ubv;
-            expr->oper(expr, stackpos);
-            result += (ubv - value_buf[end])*(value_buf[end+1] + stackpos[0])/2;
-            stackpos[0] = result;
-            if (negate) stackpos[0] *= -1;
-            //printf("    slicing old from %d to %d, %f to %f, result %f\n", start, end, value_buf[start], value_buf[end], stackpos[0]);
-            return 1<<8;
-        }
-    } //else {
-        //printf("Computing integral from %f to %f with step %f\n", lbv, ubv, dx);
-        uint32_t n_steps = (ubv - lbv)/INTEGRATE_DX + 4;
-        value = lbv;
-        if (fs->value) free(fs->value);
-        fs->value = malloc(n_steps*2*sizeof(double));
-        double *value_buf = fs->value;
-        xpos = INTEGRATE_DX;
-        result = 0;
-        // Initial value
-        expr->oper(expr, stackpos);
-        yp = stackpos[0];
-        value_buf[0] = lbv;
-        value_buf[1] = yp;
-        // Main iteration
-        uint32_t i=2;
-        while (value < ubv) {
-            value = lbv + xpos;
-            expr->oper(expr, stackpos);
-            result += INTEGRATE_DX*(stackpos[0] + yp)/2;
-            yp = stackpos[0];
-            value_buf[i++] = value;
-            value_buf[i++] = yp;
-            xpos += INTEGRATE_DX;
-        }
-        // Final value
-        value = ubv;
-        expr->oper(expr, stackpos);
-        value_buf[i++] = value;
-        value_buf[i++] = stackpos[0];
-        fs->value_type = i<<8;
-        result += (ubv - (lbv + (xpos - INTEGRATE_DX)))*(stackpos[0] + yp)/2;
-        stackpos[0] = result;
-        if (negate) stackpos[0] *= -1;
-        //printf("Total stored length %d, predicted %d, negate %d, result %f\n", i, n_steps, negate, stackpos[0]);
-        //printf("Storing %f, %f to %p, bounds %f to %f\n", value_buf[0], value_buf[1024], value_buf, lbv, ubv);
-        return 1<<8;
-    //}
-}
-
 uint32_t func_convert_polar(void *f, double *stackpos) {
     function *fs = (function*)f;
     function *radius = fs->first_arg;
@@ -1788,7 +1682,7 @@ uint32_t func_color(void *f, double *stackpos) {
     return target->oper(target, stackpos);
 }
 
-#define N_OPERATORS 50
+#define N_OPERATORS 49
 const oper_data oper_list[N_OPERATORS] = {
     {NULL, "unknown_function", NULL},
     {func_value, "func_value", interval_value},
@@ -1838,7 +1732,6 @@ const oper_data oper_list[N_OPERATORS] = {
     {func_unique, "func_unique", NULL},
     {func_join, "func_join", NULL},
     {func_length, "func_length", NULL},
-    {func_integrate, "func_integrate", NULL},
     {func_integrate_gsl, "func_integrate_gsl", interval_integrate_gsl},
     
     {func_det, "func_det", interval_det},

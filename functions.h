@@ -67,7 +67,6 @@ uint32_t func_unique(void *f, double *stackpos);
 uint32_t func_join(void *f, double *stackpos);
 uint32_t func_length(void *f, double *stackpos);
 
-uint32_t func_integrate(void *f, double *stackpos);
 uint32_t func_integrate_gsl(void *f, double *stackpos);
 uint32_t func_convert_polar(void *f, double *stackpos);
 uint32_t func_onkeypress(void *f, double *stackpos);

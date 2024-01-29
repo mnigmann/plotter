@@ -712,6 +712,7 @@ uint32_t interval_point(void *f, double *hstackpos, double *lstackpos) {
         lstackpos[2*i] = ltemp[i%l1];
         lstackpos[2*i+1] = ltemp[l1+i%l2];
     }
+    free(htemp);
     apply_sign(fs->value_type, hstackpos, lstackpos, 0, 2*result_len);
     return (result_len<<9) | TYPE_POINT;
 }
