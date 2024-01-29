@@ -132,6 +132,10 @@ double msub(double x, double y) {
     return x-y;
 }
 
+double mround2(double x, double n) {
+    return round(x*pow(10, n))/pow(10, n);
+}
+
 uint32_t func_sub(void *f, double *stackpos) {
     return func_general_two_args(f, stackpos, msub);
 }
@@ -212,6 +216,13 @@ uint32_t func_mod(void *f, double *stackpos) {
 
 uint32_t func_floor(void *f, double *stackpos) {
     return func_general_one_arg(f, stackpos, floor);
+}
+
+uint32_t func_round(void *f, double *stackpos) {
+    function *fs = (function*)f;
+    function *arg = fs->first_arg;
+    if (arg->next_arg) return func_general_two_args(f, stackpos, mround2);
+    else return func_general_one_arg(f, stackpos, round);
 }
 
 uint32_t func_sine(void *f, double *stackpos) {
@@ -525,6 +536,7 @@ uint32_t func_list(void *f, double *stackpos) {
         }
         arg = arg->next_arg;
     } while (arg);
+    for (int i=0; i < st; i++) stackpos[i] *= SIGN_BIT(fs);
     return (st<<8) | type | TYPE_LIST;
 }
 
@@ -826,7 +838,7 @@ uint32_t func_for(void *f, double *stackpos) {
             else break;
         }
     }
-    for (i=input_len; i < st; i++) stackpos[i-input_len] = stackpos[i];
+    for (i=input_len; i < st; i++) stackpos[i-input_len] = stackpos[i]*SIGN_BIT(fs);
     
     return ((st - input_len)<<8) | (0xff&argtype) | TYPE_LIST;
 }
@@ -1006,18 +1018,12 @@ uint32_t func_extract_x(void *f, double *stackpos) {
     //printf("extracting x, arg %p, oper %p (%p), value %p, value_type %08x\n", arg, arg->oper, (func_value), arg->value, arg->value_type);
     
     uint32_t argtype, arglen;
-    if (arg->oper) {
-        argtype = arg->oper(arg, stackpos);
-        arglen = argtype>>8;
-    } else {
-        argtype = ((arg->value_type)&0x40 ? ((variable*)(arg->value))->type : arg->value_type);
-        arglen = argtype>>8;
-        for (int j=0; j < arglen; j++) stackpos[j] = VALUE_LIST(arg, j);
-    }
+    argtype = arg->oper(arg, stackpos);
+    arglen = argtype>>8;
     //printf("extracting from type %08x\n", argtype);
     if (!((argtype & TYPE_MASK) == TYPE_POINT)) FAIL("ERROR: cannot access x-coordinate of type %08x, block %p\n", argtype, fs);
     for (int i=0; i < arglen; i += 2) {
-        stackpos[i>>1] = stackpos[i];
+        stackpos[i>>1] = SIGN_BIT(fs)*stackpos[i];
     }
     return ((argtype>>1) & 0xffffff00) | ((argtype&0xff) & ~TYPE_MASK);
 }
@@ -1027,17 +1033,11 @@ uint32_t func_extract_y(void *f, double *stackpos) {
     function *arg = fs->first_arg;
     
     uint32_t argtype, arglen;
-    if (arg->oper) {
-        argtype = arg->oper(arg, stackpos);
-        arglen = argtype>>8;
-    } else {
-        argtype = ((arg->value_type)&0x40 ? ((variable*)(arg->value))->type : arg->value_type);
-        arglen = argtype>>8;
-        for (int j=0; j < arglen; j++) stackpos[j] = VALUE_LIST(arg, j);
-    }
+    argtype = arg->oper(arg, stackpos);
+    arglen = argtype>>8;
     if (!((argtype & TYPE_MASK) == TYPE_POINT)) FAIL("ERROR: cannot access y-coordinate of type %08x\n", argtype);
     for (int i=0; i < arglen; i += 2) {
-        stackpos[i>>1] = stackpos[i+1];
+        stackpos[i>>1] = SIGN_BIT(fs)*stackpos[i+1];
     }
     return ((argtype>>1) & 0xffffff00) | ((argtype&0xff) & ~TYPE_MASK);
 }
@@ -1788,13 +1788,14 @@ uint32_t func_color(void *f, double *stackpos) {
     return target->oper(target, stackpos);
 }
 
-#define N_OPERATORS 49
+#define N_OPERATORS 50
 const oper_data oper_list[N_OPERATORS] = {
     {NULL, "unknown_function", NULL},
     {func_value, "func_value", interval_value},
 
     {func_div, "func_div", interval_div},
     {func_floor, "func_floor", NULL},
+    {func_round, "func_round", NULL},
     {func_mod, "func_mod", NULL},
     {func_max, "func_max", NULL},
     {func_sine, "func_sine", interval_sine},

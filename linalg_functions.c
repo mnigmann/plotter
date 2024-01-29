@@ -6,6 +6,7 @@
 #include <lapack.h>
 #include <complex.h>
 #include <string.h>
+#include <time.h>
 
 #define SIGN_BIT(v) (((v->value_type)&0x80) ? -1 : 1)
 
@@ -259,3 +260,52 @@ uint32_t func_det(void *f, double *stackpos) {
     }
 }
 
+uint32_t func_rref(void *f, double *stackpos) {
+    function *fs = (function*)f;
+    function *arg = fs->first_arg;
+
+    uint32_t argtype, alen, blen;
+    int32_t m=0, n=0;
+    argtype = arg->oper(arg, stackpos);
+    alen = argtype>>8;
+    if (arg->next_arg) {
+        arg->next_arg->oper(arg->next_arg, stackpos+alen);
+        m = stackpos[alen];
+    }
+    int info;
+    if (IS_TYPE(argtype, TYPE_POINT)) {
+        FAIL("ERROR: rref of complex matrix is not supported\n");
+    } else {
+        if (m) n = alen/m;
+        else {
+            n = isqrt(alen);
+            m = n;
+        }
+        int *ipiv = (int*)(stackpos+alen);
+        if (n*m != alen) FAIL("ERROR: Bad dimension in rref\n");
+        clock_t t1 = clock();
+        LAPACK_dgetrf(&m, &n, stackpos, &m, ipiv, &info);
+        clock_t t2 = clock();
+        printf("LAPACK routine took %luus\n", t2-t1);
+        double scale;
+        int32_t min_mn = m;
+        if (n < min_mn) min_mn = n;
+        t1 = clock();
+        for (int i=0; i < min_mn; i++) {
+            if (stackpos[(n+1)*i] == 0) continue;
+            for (int j=0; j < i; j++) {
+                if (stackpos[n*j+i] == 0) continue;
+                scale = stackpos[n*j+i]/stackpos[(n+1)*i];
+                for (int k=i+1; k < n; k++) stackpos[n*j+k] -= scale*stackpos[n*i+k];
+                stackpos[n*j+i] = 0;
+            }
+        }
+        t2 = clock();
+        printf("rref took %luus\n", t2-t1);
+        for (int i=0; i < m; i++) {
+            for (int j=0; j < n; j++) printf("% .2f  ", stackpos[n*i+j]);
+            printf("\n");
+        }
+        return (alen<<8) | TYPE_LIST;
+    }
+}

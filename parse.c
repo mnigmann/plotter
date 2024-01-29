@@ -9,16 +9,16 @@
 #include <math.h>
 #include <time.h>
 
-#define N_FUNCTIONS 19
+#define N_FUNCTIONS 21
 const char *function_names[N_FUNCTIONS] = {
     "arctan",       "cos",          "sin",          "mod",          "floor",        "polygon",      "total",        "distance",
     "rgb",          "max",          "abs",          "sort",         "join",         "length",       "solve",        "eigvals",
-    "unique",       "onkeypress",   "color",
+    "unique",       "onkeypress",   "color",        "round",        "rref"
 };
 uint32_t (*function_pointers[N_FUNCTIONS])(void*, double*) = {
     func_arctan,    func_cosine,    func_sine,      func_mod,       func_floor,     func_polygon,   func_total,     func_distance,
     func_rgb,       func_max,       func_abs,       func_sort,      func_join,      func_length,    func_solve,     func_eigvals,
-    func_unique,    func_onkeypress,func_color
+    func_unique,    func_onkeypress,func_color,     func_round,     func_rref
 };
 
 int extract_braces(char* latex, int start) {
@@ -69,6 +69,7 @@ int extract_double(char *latex, int start, double *result) {
     uint8_t is_constant = 1;
     double pow = 0.1;
     double value = 0;
+    while (latex[start] == ' ') start++;
     for (int i=start; i < end; i++) {
         if ((i == start) && (latex[i] == '-')) is_constant |= 0x02;
         else if (latex[i] == '.') is_constant |= 0x04;
@@ -330,7 +331,7 @@ void evaluate_from(file_data *fd, expression *top_expr) {
             if (type>>8) memcpy(ptr, stack, (type>>8)*sizeof(double));
             else if (!ptr) ptr = stack;
 #ifdef DEBUG_EVAL
-            printf("    result "); print_object_short(type, ptr);
+            printf("    result "); print_object(type, ptr);
             printf(" stored to %p, has type %08x\n", ptr, type);
 #endif
             if (type & TYPE_POINT) expr->flags |= EXPRESSION_PLOTTABLE | EXPRESSION_FIXED;
@@ -503,7 +504,7 @@ int parse_latex_rec(char *latex, int end, function *function_list, double *stack
     uint8_t subtract = 0;
     uint8_t n_leftright = 0;
     uint8_t n_braces = 0;
-    uint8_t n_terms = 0;
+    uint32_t n_terms = 0;
     int func_pos = 0;
     int last_pos = 0;
     uint8_t flags;
