@@ -47,7 +47,7 @@ expression expression_list[100];
 expression *deptable[300];
 double stack[65536];
 double lstack[65536];
-char stringbuf[600];
+char stringbuf[1024];
 file_data fd;
 
 uint32_t n_expr;
@@ -1177,6 +1177,7 @@ void run_action(file_data *fd, function *action) {
     while (expr) {
         if ((expr->var) && (expr->var->new_pointer)) {
             printf("expression %p (offset %ld) has changed, expr->var %p\n", expr, expr - (fd->expression_list) + 1, expr->var);
+            expr->flags |= EXPRESSION_EVALUATE;
             if (!from) from = expr;
             if ((((expr->var->type)>>8) != 0) && (expr->var->pointer)) free(expr->var->pointer);
             expr->var->pointer = expr->var->new_pointer;

@@ -17,6 +17,7 @@
 #define EXPRESSION_PLOTTABLE 0x01
 #define EXPRESSION_FIXED 0x02
 #define EXPRESSION_ACTION 0x04
+#define EXPRESSION_EVALUATE 0x08
 
 #define PARSE_COMMA 0x01
 #define PARSE_NEWVAR 0x02
@@ -60,6 +61,7 @@ typedef struct expression_s {
     struct variable_s *var;                 // Variable to which the expression is assigned, may be NULL
     struct function_s *func;                // Root operation of the expression
     struct expression_s **dependencies;     // List of variables that this expression depends upon
+    struct expression_s **dependents;
     uint8_t num_dependencies;               // Number of variables this expression depends upon
     uint8_t num_nonfixed_dependencies;      // Number of non-fixed variables this expression depends upon
     uint8_t num_dependents;                 // Number of expressions that depend on this expression.

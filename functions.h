@@ -23,6 +23,8 @@ uint32_t func_floor(void *f, double *stackpos);
 uint32_t func_round(void *f, double *stackpos);
 uint32_t func_mod(void *f, double *stackpos);
 uint32_t func_max(void *f, double *stackpos);
+uint32_t func_min(void *f, double *stackpos);
+uint32_t func_sign(void *f, double *stackpos);
 uint32_t func_sine(void *f, double *stackpos);
 uint32_t func_cosine(void *f, double *stackpos);
 uint32_t func_tangent(void *f, double *stackpos);

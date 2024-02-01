@@ -114,6 +114,11 @@ double mmax(double a, double b) {
     return b;
 }
 
+double mmin(double a, double b) {
+    if (a<b) return a;
+    return b;
+}
+
 double mlogfac(double x) {
     double v = lanczos_table[0];
     for (int i=1; i < 9; i++) {
@@ -134,6 +139,12 @@ double msub(double x, double y) {
 
 double mround2(double x, double n) {
     return round(x*pow(10, n))/pow(10, n);
+}
+
+double msign(double x) {
+    if (x > 0) return 1;
+    if (x < 0) return -1;
+    return 0;
 }
 
 uint32_t func_sub(void *f, double *stackpos) {
@@ -288,7 +299,28 @@ uint32_t func_max(void *f, double *stackpos) {
     for (int i=1; i < (type>>8); i++) {
         if (stackpos[i] > stackpos[0]) stackpos[0] = stackpos[i];
     }
+    stackpos[0] *= SIGN_BIT(fs);
     return (1<<8);
+}
+
+uint32_t func_min(void *f, double *stackpos) {
+    function *fs = (function*)f;
+    function *arg = fs->first_arg;
+    if (arg->next_arg) {
+        uint32_t type = func_general_two_args(f, stackpos, mmin);
+        return type;
+    }
+    
+    uint32_t type = arg->oper(arg, stackpos);
+    for (int i=1; i < (type>>8); i++) {
+        if (stackpos[i] < stackpos[0]) stackpos[0] = stackpos[i];
+    }
+    stackpos[0] *= SIGN_BIT(fs);
+    return (1<<8);
+}
+
+uint32_t func_sign(void *f, double *stackpos) {
+    return func_general_one_arg(f, stackpos, msign);
 }
 
 // The arctan function can have either one or two arguments
@@ -445,6 +477,7 @@ uint32_t func_multiply(void *f, double *stackpos) {
     double *pos;
     while (arg) {
         type = arg->oper(arg, stackpos+result_length*GET_STEP(result_type));
+        //printf("multiplying %08x ", type); print_object(type, stackpos+result_length*GET_STEP(result_type)); printf("\n");
         // Keep track of the position in case result_length is changed.
         pos = stackpos+result_length*GET_STEP(result_type);
         multiply_in_place(stackpos, pos, &result_type, &result_length, type);
@@ -1682,7 +1715,7 @@ uint32_t func_color(void *f, double *stackpos) {
     return target->oper(target, stackpos);
 }
 
-#define N_OPERATORS 49
+#define N_OPERATORS 51
 const oper_data oper_list[N_OPERATORS] = {
     {NULL, "unknown_function", NULL},
     {func_value, "func_value", interval_value},
@@ -1692,6 +1725,8 @@ const oper_data oper_list[N_OPERATORS] = {
     {func_round, "func_round", NULL},
     {func_mod, "func_mod", NULL},
     {func_max, "func_max", NULL},
+    {func_min, "func_min", NULL},
+    {func_sign, "func_sign", NULL},
     {func_sine, "func_sine", interval_sine},
     {func_cosine, "func_cosine", interval_cosine},
     {func_tangent, "func_tangent", interval_tangent},
