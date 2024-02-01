@@ -1,0 +1,127 @@
+### Circuit simulator based on https://www.desmos.com/calculator/1hcvlujoio
+### Run with ./build/plotter examples/circuits.txt 0 100
+### Press 's' key to start simulation
+A_{run}
+t_{s}=5\cdot10^{-6}
+V_{T}=0.025865
+V_{init}=\left[0,0,1,0\right]
+
+T_{w}=1
+T_{r}=2
+T_{d}=3
+T_{tn}=4
+T_{g}=5
+T_{p}=6
+T_{c}=7
+T_{l}=8
+T_{op}=9
+G\left(P_{0},P_{1},n,t\right)=\left\{t=T_{r}:G_{r}\left(P_{0},P_{1},n\right),t=T_{c}:G_{c}\left(P_{0},P_{1},n\right),t=T_{op}:G_{op}\left(P_{0},P_{1},n\right),\left(0,0\right)\right\}
+X_{0}=\left[0,0,-4,4,0,-4,0,0,0,0,0,-4,-4,4\right]
+Y_{0}=\left[4,4,4,4,0,-2,0,0,2,-2,4,-2,0,2\right]
+X_{1}=\left[4,-4,-4,4,-4,-4,0,0,4,4,0,0,-4,4\right]
+Y_{1}=\left[4,4,3,2,0,-3,1,-2,2,-2,3,-2,-2,-2\right]
+T=\left[2,2,5,1,7,5,1,1,9,2,1,2,1,7\right]
+V=\left[1200,500,0,0,0.000001,0,0,0,100000,100,0,100,0,0.000001\right]
+
+### Netlist generation
+N_{s0}=\left(X_{0},Y_{0}\right)\left[\left|T-T_{p}\right|\left|T-T_{g}\right|\left|T-T_{w}\right|>0\right]
+N_{s1}=\left(X_{1},Y_{1}\right)\left[\left|T-T_{p}\right|\left|T-T_{g}\right|\left|T-T_{w}\right|>0\right]
+N_{st}=T\left[\left|T-T_{p}\right|\left|T-T_{g}\right|\left|T-T_{w}\right|>0\right]
+N_{sv}=V\left[\left|T-T_{p}\right|\left|T-T_{g}\right|\left|T-T_{w}\right|>0\right]
+A_{pindex}\left(r,v\right)=\sum_{n=1}^{\operatorname{length}\left(r\right)}\left\{\left|r\left[n\right].x-v.x\right|+\left|r\left[n\right].y-v.y\right|=0:n,0\right\}
+A_{csnn}=\left[\left(\sum_{j=1}^{i}\left\{N_{st}\left[j\right]=T_{tn}:3,N_{st}\left[j\right]=T_{op}:3,2\right\}\right)\operatorname{for}i=\left[0,...,\operatorname{length}\left(N_{st}\right)\right]\right]
+A_{csnnn}=\sum_{n=1}^{\operatorname{length}\left(A_{csnn}\right)}\left\{\left[0,...,\max\left(A_{csnn}\right)-1\right]\ge A_{csnn}\left[n\right]:1,0\right\}
+L_{p}=\left[1,...,\operatorname{length}\left(A_{csnnn}\right)\right]-A_{csnn}\left[A_{csnnn}\right]-1
+N_{f}=\operatorname{unique}\left(G\left(N_{s0}\left[A_{csnnn}\right],N_{s1}\left[A_{csnnn}\right],L_{p},N_{st}\left[A_{csnnn}\right]\right)\right)
+n_{f}=\operatorname{length}\left(N_{f}\right)
+N_{n}=\left[1,...,n_{f}\right]
+N_{w}=\left(A_{pindex}\left(N_{f},\left(X_{0},Y_{0}\right)\left[T=T_{w}\right]\right),A_{pindex}\left(N_{f},\left(X_{1},Y_{1}\right)\left[T=T_{w}\right]\right)\right)
+N_{deg}=\sum_{n=1}^{\operatorname{length}\left(N_{w}\right)}\left\{N_{n}=N_{w}\left[n\right].x:1,N_{n}=N_{w}\left[n\right].y:1,0\right\}
+N_{adj}=\left(\sum_{n=1}^{\operatorname{length}\left(N_{w}\right)}\left[\left\{\operatorname{distance}\left(N_{w}\left[n\right],\left(i,j\right)\right)\operatorname{distance}\left(N_{w}\left[n\right],\left(j,i\right)\right)=0:1,0\right\}\operatorname{for}i=N_{n},j=N_{n}\right]\right)-\left[\left\{i=j:N_{deg}\left[i\right],0\right\}\operatorname{for}i=N_{n},j=N_{n}\right]
+N_{rref}=\operatorname{rref}\left(N_{adj}\right)
+N_{diag}=\left[\sum_{n=0}^{i-1}\left\{N_{rref}\left[\left(n_{f}+1\right)n+1\right]=0:1,0\right\}\operatorname{for}i=N_{n}\right]\cdot\left\{N_{rref}\left[N_{n}+n_{f}\left(N_{n}-1\right)\right]=0:1,0\right\}
+n_{u}=\operatorname{length}\left(N_{diag}\left[N_{diag}>0\right]\right)
+N_{c}=\sum_{n=1}^{n_{f}}\left[N_{diag}\left[n\right]\left\{i>n:0,i=n:1,\left|N_{rref}\left[n+n_{f}\left(i-1\right)\right]\right|<10^{-6}:0,1\right\}\operatorname{for}i=N_{n}\right]
+L_{endpoints}=N_{c}\left[A_{pindex}\left(N_{f},G\left(N_{s0}\left[A_{csnnn}\right],N_{s1}\left[A_{csnnn}\right],\left[1,...,\operatorname{length}\left(A_{csnnn}\right)\right]-A_{csnn}\left[A_{csnnn}\right]-1,N_{st}\left[A_{csnnn}\right]\right)\right)\right]
+N_{pwr}=N_{c}\left[A_{pindex}\left(N_{f},\left(X_{0},Y_{0}\right)\left[\left(T-T_{p}\right)\left(T-T_{g}\right)=0\right]\right)\right]
+N_{np}=\left[1,...,n_{u}\right]\left[\left(\sum_{i=1}^{\operatorname{length}\left(N_{pwr}\right)}\left\{N_{pwr}\left[i\right]=\left[1,...,n_{u}\right]:1,0\right\}\right)=0\right]
+V_{fv}=\sum_{i=1}^{\operatorname{length}\left(N_{pwr}\right)}\left\{\left[1,...,n_{u}\right]=N_{pwr}\left[i\right]:V\left[\left(T-T_{p}\right)\left(T-T_{g}\right)=0\right]\left[i\right],0\right\}
+N_{inp}=\sum_{h_{2}=1}^{\operatorname{length}\left(N_{np}\right)}\left\{\left[1,...,n_{u}\right]=N_{np}\left[h_{2}\right]:h_{2},0\right\}
+U_{ln}=N_{inp}\left[L_{endpoints}\right]
+U_{lv}=V_{fv}\left[L_{endpoints}\right]
+U_{lsv}=N_{sv}\left[A_{csnnn}\right]
+U_{lst}=N_{st}\left[A_{csnnn}\right]
+U_{lc}=A_{csnnn}
+U_{lp}=L_{p}
+U_{np}=N_{np}
+A_{getnpins}\left(t\right)=\left\{t=T_{op}:3,2\right\}
+
+### Simulation
+A_{reset}=P\to 0\cdot N_{st},V_{old}\to V_{init},V_{prev}\to V_{init}
+V_{old}=V_{init}
+V_{prev}=V_{init}
+# Old voltage for each pin
+U_{lnv}=\left\{U_{ln}>0:V_{old}\left[U_{ln}\right],U_{lv}\right\}
+# Current voltage for each pin
+U_{lnvp}=\left\{U_{ln}>0:V_{prev}\left[U_{ln}\right],U_{lv}\right\}
+P=\left[0,0,0,0,0,0,0,0,0\right]
+#F=\sum_{n=1}^{\operatorname{length}\left(U_{lc}\right)}\left(\left\{U_{lst}\left[n\right]=T_{r}:H_{r}\left(U_{lnv}\left[U_{lc}=U_{lc}\left[n\right]\right],U_{lp}\left[n\right],U_{lsv}\left[n\right]\right),U_{lst}\left[n\right]=T_{d}:H_{d}\left(U_{lnv}\left[U_{lc}=U_{lc}\left[n\right]\right],U_{lp}\left[n\right],U_{lsv}\left[n\right]\right),U_{lst}\left[n\right]=T_{tn}:H_{tn}\left(U_{lnv}\left[U_{lc}=U_{lc}\left[n\right]\right],U_{lp}\left[n\right],U_{lsv}\left[n\right]\right),U_{lst}\left[n\right]=T_{c}:H_{c}\left(U_{lnv}\left[U_{lc}=U_{lc}\left[n\right]\right],U_{lp}\left[n\right],U_{lsv}\left[n\right],U_{lnvp}\left[U_{lc}=U_{lc}\left[n\right]\right]\right),U_{lst}\left[n\right]=T_{l}:H_{l}\left(U_{lnv}\left[U_{lc}=U_{lc}\left[n\right]\right],U_{lp}\left[n\right],U_{lsv}\left[n\right],P\left[U_{lc}\left[n\right]\right]\right),U_{lst}\left[n\right]=T_{op}:H_{op}\left(U_{lnv}\left[U_{lc}=U_{lc}\left[n\right]\right],U_{lp}\left[n\right],U_{lsv}\left[n\right]\right)\right\}\cdot\left\{\left[1,...,\operatorname{length}\left(U_{np}\right)\right]=U_{ln}\left[n\right]:1,0\right\}\right)
+
+R\left(v,i,j,k,v_{p},t\right)=\left\{t=T_{r}:R_{r}\left(v,i,j,k\right),t=T_{c}:R_{c}\left(v,i,j,k,v_{p}\right),t=T_{op}:R_{op}\left(v,i,j,k\right),0\right\}
+
+F=\sum_{n=1}^{\operatorname{length}\left(U_{lc}\right)}\left(\left\{U_{lst}\left[n\right]=T_{r}:H_{r}\left(U_{lnv}\left[U_{lc}=U_{lc}\left[n\right]\right],U_{lp}\left[n\right],U_{lsv}\left[n\right]\right),U_{lst}\left[n\right]=T_{c}:H_{c}\left(U_{lnv}\left[U_{lc}=U_{lc}\left[n\right]\right],U_{lp}\left[n\right],U_{lsv}\left[n\right],U_{lnvp}\left[U_{lc}=U_{lc}\left[n\right]\right]\right),U_{lst}\left[n\right]=T_{op}:H_{op}\left(U_{lnv}\left[U_{lc}=U_{lc}\left[n\right]\right],U_{lp}\left[n\right],U_{lsv}\left[n\right]\right)\right\}\cdot\left\{\left[1,...,\operatorname{length}\left(U_{np}\right)\right]=U_{ln}\left[n\right]:1,0\right\}\right)
+
+J=\sum_{n_{c}=1}^{\operatorname{length}\left(U_{lst}\right)}\left\{U_{ln}\left[n_{c}\right]=0:0\cdot\left[1,...,\operatorname{length}\left(U_{np}\right)^{2}\right],\sum_{n_{e}=1}^{A_{getnpins}\left(U_{lst}\left[n_{c}\right]\right)}\operatorname{sign}\left(U_{ln}\left[U_{lc}=U_{lc}\left[n_{c}\right]\right]\left[n_{e}\right]\right)R\left(U_{lnv}\left[U_{lc}=U_{lc}\left[n_{c}\right]\right],U_{lp}\left[n_{c}\right],n_{e}-1,U_{lsv}\left[n_{c}\right],U_{lnvp}\left[U_{lc}=U_{lc}\left[n_{c}\right]\right],U_{lst}\left[n_{c}\right]\right)\cdot\left\{\left[1,...,\operatorname{length}\left(U_{np}\right)^{2}\right]=\operatorname{length}\left(U_{np}\right)\left(U_{ln}\left[U_{lc}=U_{lc}\left[n_{c}\right]\right]\left[n_{e}\right]-1\right)+U_{ln}\left[n_{c}\right]:1,0\right\}\right\}
+
+V_{diff}=\operatorname{solve}\left(J, -F\right)
+
+V_{1l}=\left[\right]
+V_{2l}=\left[\right]
+V_{3l}=\left[\right]
+A_{converge}=V_{old}\to V_{old}+\min\left(1,\max\left(-1,V_{diff}\right)\right)
+A_{run}=\left\{\max\left(\left|V_{diff}\left[1...\operatorname{length}\left(U_{np}\right)\right]\right|\right)>10^{-14}:A_{converge},\left(A_{next},V_{1l}\to\operatorname{join}\left(V_{1l},\left[V_{old}\left[1\right]\right]\right),V_{2l}\to\operatorname{join}\left(V_{2l},\left[V_{old}\left[2\right]\right]\right),V_{3l}\to\operatorname{join}\left(V_{3l},\left[V_{old}\left[3\right]\right]\right)\right)\right\}
+A_{next}=V_{prev}\to V_{old}
+
+### plotting
+\left(\frac{\left[1,...,\operatorname{length}\left(V_{1l}\right)\right]}{10}-8,V_{1l}-10\right)
+\left(\frac{\left[1,...,\operatorname{length}\left(V_{2l}\right)\right]}{10}-8,V_{2l}-10\right)
+\left(\frac{\left[1,...,\operatorname{length}\left(V_{3l}\right)\right]}{10}-8,V_{3l}-10\right)
+
+### wire graphics
+C_{w}=\left[1,...,\operatorname{length}\left(T\right)\right]\left[T=T_{w}\right]
+D_{r}\left(\left(t-0.5\right)A_{dist}\left(C_{w}\right),0,C_{w}\right)
+
+### resistor graphics
+X_{r}\left(t,l\right)=\left\{-1\le t\le 0:\frac{t\left(l-2\right)}{2}-1,0\le t\le 1:2t-1,1\le t\le 2:\left(t-1\right)\left(\frac{l}{2}-1\right)+1\right\}
+Y_{r}\left(t,l\right)=\left\{-1\le t\le 0:0,0\le t\le 1:-\frac{\arcsin\left(\sin\left(8\pi t\right)\right)}{\pi},1\le t\le 2:0\right\}
+C_{r}=\left[1,...,\operatorname{length}\left(T\right)\right]\left[T=T_{r}\right]
+#C_{r}=\left[1,2,10,12\right]
+G_{r}\left(P_{0},P_{1},n\right)=\left\{n=0:P_{0},P_{1}\right\}
+D_{r}\left(X_{r}\left(3t-1,A_{dist}\left(C_{r}\right)\right),Y_{r}\left(3t-1,A_{dist}\left(C_{r}\right)\right),C_{r}\right)
+H_{r}\left(v,n,r\right)=\left\{n=0:\frac{v\left[2\right]-v\left[1\right]}{r},\frac{v\left[1\right]-v\left[2\right]}{r}\right\}
+R_{r}\left(v,i,j,r\right)=\left\{i=j:-\frac{1}{r},\frac{1}{r}\right\}
+
+### capacitor graphics
+X_{c}\left(t,l\right)=\left\{-1\le t\le0:\frac{t\left(l-0.8\right)}{2}-0.4,0\le t\le \frac{1}{2}:-0.4,\frac{1}{2}\le t\le 1:0.4,1\le t\le 2:\frac{\left(t-1\right)\left(l-0.8\right)}{2}+0.4\right\}
+Y_{c}\left(t,l\right)=\left\{0\le t\le \frac{1}{2}:\frac{1.6t}{0.5}-0.8,\frac{1}{2}\le t\le 1:\frac{1.6t}{0.5}-2.4,0\right\}
+C_{c}=\left[1,...,\operatorname{length}\left(T\right)\right]\left[T=T_{c}\right]
+G_{c}\left(P_{0},P_{1},n\right)=\left\{n=0:P_{0},P_{1}\right\}
+D_{r}\left(X_{c}\left(3t-1,A_{dist}\left(C_{c}\right)\right),Y_{c}\left(3t-1,A_{dist}\left(C_{c}\right)\right),C_{c}\right)
+H_{c}\left(v,n,C,v_{p}\right)=\left\{n=0:-1,1\right\}\cdot\frac{C\left(v\left[1\right]-v\left[2\right]-v_{p}\left[1\right]+v_{p}\left[2\right]\right)}{t_{s}}
+R_{c}\left(v,i,j,C,v_{p}\right)=\left\{i=j:-1,1\right\}\cdot\frac{C}{t_{s}}
+
+### op amp graphics
+X_{op}\left(t,l\right)=\left\{-2\le t<-1:\frac{l-3}{2}\left(t+1\right)-1.5,-1\le t<0:\frac{l-3}{2}t-1.5,0\le t<1:-1.5,1\le t<2:3t-4.5,2\le t<3:3t-7.5,3\le t<4:0.3t-2,4\le t<5:0.3t-2.3,5\le t<6:-0.95,6\le t<7:\frac{l-3}{2}\left(t-6\right)+1.5\right\}
+Y_{op}\left(t,l\right)=\left\{-2\le t<-1:-1,-1\le t<0:1,0\le t\le1:4t-2,1\le t<2:4-2t,2\le t<3:2t-6,3\le t<4:1,4\le t<5:-1,5\le t<6:0.3t-2.65,6\le t<7:0\right\}
+C_{op}=\left[1,...,\operatorname{length}\left(T\right)\right]\left[T=T_{op}\right]
+G_{op}\left(P_{0},P_{1},n\right)=\left\{n=0:P_{1},n=1:P_{0}+\frac{\left(P_{0}.y-P_{1}.y,P_{1}.x-P_{0}.x\right)}{\operatorname{distance}\left(P_{0},P_{1}\right)},P_{0}-\frac{\left(P_{0}.y-P_{1}.y,P_{1}.x-P_{0}.x\right)}{\operatorname{distance}\left(P_{0},P_{1}\right)}\right\}
+D_{r}\left(X_{op}\left(9t-2,A_{dist}\left(C_{op}\right)\right),Y_{op}\left(9t-2,A_{dist}\left(C_{op}\right)\right),C_{op}\right)
+H_{op}\left(v,n,k\right)=\left\{n=0:10\left(\min\left(15,\max\left(-15,k\left(v\left[3\right]-v\left[2\right]\right)\right)\right)-v\left[1\right]\right),n=1:0,n=2:0\right\}
+R_{op}\left(v,i,j,k\right)=\left\{i=0:\left\{j=0:-10,\left\{j=1:-10k,j=2:10k\right\}\left\{k\left|v\left[3\right]-v\left[2\right]\right|>15:\frac{15}{k\left|v\left[3\right]-v\left[2\right]\right|},1\right\}\right\},0\right\}
+
+### General graphics
+A_{dist}\left(n\right)=\left(\left(X_{1}\left[n\right]-X_{0}\left[n\right]\right)^{2}+\left(Y_{1}\left[n\right]-Y_{0}\left[n\right]\right)^{2}\right)^{0.5}
+D_{r}\left(x,y,n\right)=D\left(x,y,X_{0}\left[n\right],Y_{0}\left[n\right],X_{1}\left[n\right],Y_{1}\left[n\right]\right)
+D\left(x,y,x_{0},y_{0},x_{1},y_{1}\right)=\frac{\left(\left(x_{1}-x_{0}\right)x-\left(y_{1}-y_{0}\right)y,\left(y_{1}-y_{0}\right)x+\left(x_{1}-x_{0}\right)y\right)}{\left(\left(x_{1}-x_{0}\right)^{2}+\left(y_{1}-y_{0}\right)^{2}\right)^{0.5}}+\frac{\left(x_{0}+x_{1},y_{0}+y_{1}\right)}{2}
+
+
