@@ -73,6 +73,8 @@ typedef struct expression_s {
     double *value;                          // Pointer to the value of the expression. Used when plotting
     uint32_t value_type;                    // Type of the last value of the expression. Used when plotting
     uint32_t cache_size;                    // Size of the cache array (used for explicit and implicit plotting)
+    double *special_points;                 // Pointer to array of special points (endpoints, discontinuities, extrema)
+    uint32_t n_special_points;              // Size of array of special points
     char *def;                              // Pointer to char array containing definition. Freed after parsing
 } expression;
 

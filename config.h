@@ -6,6 +6,7 @@
 #define COLOR_AXES 64
 #define COLOR_MAJOR_GRID 160
 #define COLOR_MINOR_GRID 220
+#define COLOR_SPECIAL_POINT 0xdcdcdc
 
 // Distance between axis and number, in pixels
 #define AXIS_DISTANCE 3

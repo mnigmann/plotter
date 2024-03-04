@@ -23,6 +23,7 @@
 #define CLIP_HEIGHT(v) (v<0 ? 0 : (v>HEIGHT ? HEIGHT : v))
 #define IN_BOUNDS(x, y) ((window_x0 <= x) && (x <= window_x1) && (window_y0 <= y) && (y <= window_y1) && (x == x) && (y == y))
 #define SET_COLOR(cr, color) cairo_set_source_rgb(cr, color[0]/256.0, color[1]/256.0, color[2]/256.0)
+#define SET_COLOR_HEX(cr, color) cairo_set_source_rgb(cr, ((color>>16)&255)/256.0, ((color>>8)&255)/256.0, (color&255)/256.0)
 #define SET_COLOR_OPACITY(cr, color, opacity) cairo_set_source_rgba(cr, color[0]/256.0, color[1]/256.0, color[2]/256.0, opacity)
 
 #define TOIDX(x, y) (3*(x + y*WIDTH))
@@ -180,33 +181,61 @@ void est_radius(double x0, double y0, double x1, double y1, double x2, double y2
     *speed = sqrt(d01);
 }
 
-void find_extremum(expression *expr, double *stackpos, double x, double y, double xp, double yp, double xpp, double ypp) {
+void find_extremum(expression *expr, double *stackpos, double x, double y, double xp, double yp, double xpp, double ypp, uint8_t mode) {
     double u1, v1, u2, v2, ex, temp, val, m1, m2;
-    // We assume that x > xp > xpp
+    double y_ex, ydiff;
     for (int i=0; i < 10; i++) {
         u1 = x - xp; v1 = y - yp;
         u2 = xpp - xp; v2 = ypp - yp;
         temp = fabs(yp) * PLOT_EXTREMUM_EPS;
         if ((fabs(v1) < temp) && (fabs(v2) < temp)) break;
         ex = (u2*u2*v1 - u1*u1*v2)/(2*(u2*v1 - u1*v2));
-        if (ex > 0) {
-            xpp = xp;
-            ypp = yp;
-            xp += ex;
-            eval_func(xp, &temp, &yp, expr, stackpos);
-        } else if (ex < 0) {
-            x = xp;
-            y = yp;
-            xp += ex;
-            eval_func(xp, &temp, &yp, expr, stackpos);
-        } else {
+        eval_func(xp+ex, &temp, &y_ex, expr, stackpos);
+        if (mode) ydiff = y_ex - yp;
+        else ydiff = yp - y_ex;
+        // We know without loss of generality that y > yp < ypp
+        // If ex > 0 then x_ex is between xp and x
+        //     If y_ex is between yp and y, then we use it as an endpoint
+        //     If y_ex is less than than yp, then xp = x_ex and xpp = x_p
+        // If ex < 0 then x_ex is between xp and xpp
+        if (ex == 0) {
             x = (x + xp)/2;
             eval_func(x, &temp, &y, expr, stackpos);
             xpp = (xpp + xp)/2;
             eval_func(xpp, &temp, &ypp, expr, stackpos);
+        } else if ((ex > 0) == (xpp > xp)) {
+            // towards xpp
+            if (ydiff > 0) {
+                // New point is more extreme than the current extremum
+                x = xp;
+                y = yp;
+                xp += ex;
+                yp = y_ex;
+            } else {
+                // New point is less extreme than the current extremum
+                xpp = xp + ex;
+                ypp = y_ex;
+            }
+        } else {
+            // towards x
+            if (ydiff > 0) {
+                xpp = xp;
+                ypp = yp;
+                xp += ex;
+                yp = y_ex;
+            } else {
+                x = xp + ex;
+                y = y_ex;
+            }
         }
-        printf("    iterated extremum at %f, value %f\n", xp, yp);
+        printf("    iterated extremum at %f, value %f, ex %f; (%f, %f) (%f, %f) (%f, %f)\n", xp, yp, ex, xpp, ypp, xp, yp, x, y);
     }
+    uint32_t old_n = expr->n_special_points;
+    expr->special_points = realloc(expr->special_points, 3*sizeof(double)*(old_n + 1));
+    expr->special_points[3*old_n] = xp;
+    expr->special_points[3*old_n+1] = xp;
+    expr->special_points[3*old_n+2] = yp;
+    expr->n_special_points++;
 }
 
 void find_discontinuity(expression *expr, double *stackpos, double t, double x, double y, double tp, double xp, double yp, cairo_t *cr) {
@@ -319,12 +348,13 @@ void draw_function_constant_ds_rec(expression *expr, file_data *fd, cairo_t *cr,
             if ((x == x) && (y == y)) {
                 ds = hypot((x-xp)*xscale, (y-yp)*yscale);
                 dt = PLOT_MAX_ARC_LENGTH*dt/ds;
-                /*if ((yp > ypp) && (yp > y) && (step >= 2)) {
+                if ((yp > ypp) && (yp > y) && (step >= 2)) {
                     printf("Possible maximum at %f -> (%f, %f)\n", tp, xp, yp);
-                    find_extremum(func, stackpos, t_start, y, tp, xp, tpp, ypp);
+                    find_extremum(expr, stackpos, t_start, y, tp, yp, tpp, ypp, 1);
                 } else if ((yp < ypp) && (yp < y) && (step >= 2)) {
-                    printf("Possible minimum at %f -> (%f, %f)\n", tp, xp, yp);
-                }*/
+                    printf("Possible minimum at %f -> (%f, %f) > (%f, %f) < (%f, %f)\n", tp, x, y, xp, yp, xpp, ypp);
+                    find_extremum(expr, stackpos, t_start, y, tp, yp, tpp, ypp, 0);
+                }
                 if (ds > PLOT_MAX_ARC_LENGTH*PLOT_DISCONTINUITY_THRESHOLD) {
                     //printf("Possible discontinuity between %f and %f: (%f, %f) and (%f, %f)\n", t_start, tp, x, y, xp, yp);
                     find_discontinuity(expr, stackpos, t_start, x, y, tp, xp, yp, cr);
@@ -366,19 +396,28 @@ void draw_function_constant_ds_rec(expression *expr, file_data *fd, cairo_t *cr,
         }
         //printf("Initial point (%f, %f), dt is %f\n", xp, yp, dt);
         t_end -= dt;
+        uint32_t step = 0;
         while (t_end > t_start) {
             eval_func(t_end, &x, &y, expr, stackpos);
             //printf("    function is (%f, %f) at %f\n", x, y, t_start);
             if ((x == x) && (y == y)) {
                 ds = hypot((x-xp)*xscale, (y-yp)*yscale);
                 dt = PLOT_MAX_ARC_LENGTH*dt/ds;
+                if ((yp > ypp) && (yp > y) && (step >= 2)) {
+                    printf("Possible maximum at %f -> (%f, %f) < (%f, %f) > (%f, %f)\n", tp, x, y, xp, yp, xpp, ypp);
+                    find_extremum(expr, stackpos, t_end, y, tp, yp, tpp, ypp, 1);
+                } else if ((yp < ypp) && (yp < y) && (step >= 2)) {
+                    printf("Possible minimum at %f -> (%f, %f) > (%f, %f) < (%f, %f)\n", tp, x, y, xp, yp, xpp, ypp);
+                    find_extremum(expr, stackpos, t_end, y, tp, yp, tpp, ypp, 0);
+                }
                 if (ds > PLOT_MAX_ARC_LENGTH*PLOT_DISCONTINUITY_THRESHOLD) {
                     //printf("Possible discontinuity between %f and %f: (%f, %f) and (%f, %f)\n", t_end, tp, x, y, xp, yp);
                     find_discontinuity(expr, stackpos, t_end, x, y, tp, xp, yp, cr);
                 }
                 cairo_line_to(cr, SCALE_XK(x), SCALE_YK(y));
-                xp = x; yp = y; tp = t_end; dsp = ds;
+                xpp = xp; ypp = yp; xp = x; yp = y; tpp = tp; tp = t_end; dsp = ds;
                 t_end -= dt;
+                step++;
             }
             if (!IN_BOUNDS(x, y)) {
                 // Leaving the bounds, so iterate on [t, t_end]
@@ -455,6 +494,9 @@ void draw_function_constant_ds(expression *expr, file_data *fd, uint8_t *color, 
     uint32_t n = (type>>8)/GET_STEP(type);
     //printf("Number of functions to be plotted: %d\n", n);
     expr->cache_size = 0;
+    if (expr->special_points) free(expr->special_points);
+    expr->special_points = NULL;
+    expr->n_special_points = 0;
     for (uint32_t i=0; i < n; i++) {
         flags = 0;
         eval_index = i;
@@ -472,6 +514,9 @@ void draw_function_constant_ds(expression *expr, file_data *fd, uint8_t *color, 
         if (!((x == x) && (y == y))) flags |= 0xf0;
         //printf("Initial values: (%f, %f) and (%f, %f), flags %02x\n", x, y, xp, yp, flags);
         draw_function_constant_ds_rec(expr, fd, cr, flags, t, t_end, xp, yp, min_dt);
+    }
+    for (int i=0; i < expr->n_special_points; i++) {
+        printf("Special point at %f: (%f, %f)\n", expr->special_points[3*i], expr->special_points[3*i+1], expr->special_points[3*i+2]);
     }
 }
 
@@ -1253,6 +1298,12 @@ static gboolean motion_callback(GtkWidget *event_box, GdkEventMotion *event, gpo
         cairo_set_source_rgba(cr, 0, 0, 0, 0);
         cairo_paint(cr);
         cairo_set_operator(cr, oper);
+        // Draw special points
+        SET_COLOR_HEX(cr, COLOR_SPECIAL_POINT);
+        for (uint32_t i=0; i < fd->click_expr->n_special_points; i++) {
+            cairo_arc(cr, SCALE_XK(fd->click_expr->special_points[3*i+1]), SCALE_YK(fd->click_expr->special_points[3*i+2]), POINT_SIZE, 0, 2*G_PI);
+            cairo_fill(cr);
+        }
         // Draw rectangle
         if (!status) draw_labeled_point(cr, xf, yf);
         cairo_destroy(cr);
