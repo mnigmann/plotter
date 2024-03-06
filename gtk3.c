@@ -520,7 +520,7 @@ void draw_function_constant_ds(expression *expr, file_data *fd, uint8_t *color, 
     }
 }
 
-void draw_implicit_rec(expression *expr, file_data *fd, cairo_t *cr, uint8_t *color, double *area, int divisions) {
+void draw_implicit_rec(expression *expr, file_data *fd, cairo_t *cr, uint8_t *color, double *area, int divisions, double *vbuf, double *hbuf, uint8_t buf_valid) {
     /*fd->variable_list[0].pointer = area;
     fd->variable_list[0].type = 1<<8;
     fd->variable_list[1].pointer = area+2;
@@ -528,6 +528,7 @@ void draw_implicit_rec(expression *expr, file_data *fd, cairo_t *cr, uint8_t *co
     double *stackpos = fd->stack + fd->n_stack;
     double *lstackpos = fd->lstack;
     eval_inter_2d(area, area+2, expr, stackpos, lstackpos);
+    uint32_t bufsize = (1<<(PLOT_IMPLICIT_MAXDEPTH - divisions))+1;
     //expr->func->inter(expr->func, stackpos, lstackpos);
     //niev++;
     function *func = expr->func;
@@ -547,13 +548,18 @@ void draw_implicit_rec(expression *expr, file_data *fd, cairo_t *cr, uint8_t *co
             SET_COLOR_OPACITY(cr, color, 1);
         }
 #endif
-        return;
     }
-    if (stackpos[0] < 0) {
+    if ((stackpos[0] < 0) || (lstackpos[0] > 0)) {
         // No contours can exist in the given area
         //printf("    No contours found in ([%f, %f], [%f, %f])\n", area[0], area[1], area[2], area[3]);
         //cairo_rectangle(cr, SCALE_XK(area[0]), SCALE_YK(area[3]), xscale*(area[1] - area[0]), yscale*(area[3] - area[2]));
         //cairo_stroke(cr);
+        hbuf[0] = vbuf[bufsize-1];
+        vbuf[0] = hbuf[bufsize-1];
+        for (uint32_t i=1; i<bufsize; i++) {
+            hbuf[i] = NAN;
+            vbuf[i] = NAN;
+        }
         return;
     }
     if (divisions >= PLOT_IMPLICIT_MAXDEPTH) {
@@ -565,10 +571,29 @@ void draw_implicit_rec(expression *expr, file_data *fd, cairo_t *cr, uint8_t *co
         function *arg2 = arg1->next_arg;
         double x0 = area[0], x1 = area[1], y0 = area[2], y1 = area[3];
         double e00, e10, e11, e01;
-        eval_func_2d(&x0, &y0, expr, stackpos); e00 = stackpos[0];
-        eval_func_2d(&x1, &y0, expr, stackpos); e10 = stackpos[0];
-        eval_func_2d(&x1, &y1, expr, stackpos); e11 = stackpos[0];
-        eval_func_2d(&x0, &y1, expr, stackpos); e01 = stackpos[0];
+        if ((buf_valid & 0x01) && (vbuf[0] == vbuf[0])) e00 = vbuf[0];
+        else if ((buf_valid & 0x02) && (hbuf[0] == hbuf[0])) e00 = hbuf[0];
+        else {
+            eval_func_2d(&x0, &y0, expr, stackpos); 
+            e00 = stackpos[0];
+        }
+        if (hbuf[1] == hbuf[1]) e10 = hbuf[1];
+        else {
+            eval_func_2d(&x1, &y0, expr, stackpos); 
+            e10 = stackpos[0];
+        }
+        if (vbuf[1] == vbuf[1]) {
+            e01 = vbuf[1];
+        } else {
+            eval_func_2d(&x0, &y1, expr, stackpos); 
+            e01 = stackpos[0];
+        }
+        eval_func_2d(&x1, &y1, expr, stackpos); 
+        e11 = stackpos[0];
+        vbuf[0] = e10;
+        vbuf[1] = e11;
+        hbuf[0] = e01;
+        hbuf[1] = e11;
 
         if ((e00 > 0) && (e10 > 0) && (e11 > 0) && (e01 > 0)) {
             // Interval calculation was wrong
@@ -616,7 +641,7 @@ void draw_implicit_rec(expression *expr, file_data *fd, cairo_t *cr, uint8_t *co
             edges |= 0x8;
             wpos = y0 - e00*(y0 - y1)/(e00 - e01);
         }
-        if (((singular) || (edges == 0)) && (divisions < PLOT_IMPLICIT_HARDMAX)) {
+        /*if (((singular) || (edges == 0)) && (divisions < PLOT_IMPLICIT_HARDMAX)) {
             //printf("Unresolved detail in ([%f, %f], [%f, %f])\n", area[0], area[1], area[2], area[3]);
             // Subdivide
             double x0 = area[0], x1 = area[1], y0 = area[2], y1 = area[3];
@@ -631,7 +656,7 @@ void draw_implicit_rec(expression *expr, file_data *fd, cairo_t *cr, uint8_t *co
             area[0] = xm; area[1] = x1; area[2] = ym; area[3] = y1;
             draw_implicit_rec(expr, fd, cr, color, area, divisions+1);
             return;
-        }
+        }*/
         // If two edges are selected, then draw the line between those two edges. If three 
         // edges are selected, then one of the corners must be zero so the contour must go
         // through one of the corners. If four edges are selected, there are two contour
@@ -814,14 +839,19 @@ void draw_implicit_rec(expression *expr, file_data *fd, cairo_t *cr, uint8_t *co
         double x0 = area[0], x1 = area[1], y0 = area[2], y1 = area[3];
         double xm = (x0 + x1)/2, ym = (y0 + y1)/2;
         //printf("subdividing ([%f, %f], [%f, %f]), %f, %f\n", x0, x1, y0, y1, xm, ym);
+        // Bottom left box
+        uint8_t temp_buf_valid;
         area[1] = xm; area[3] = ym;
-        draw_implicit_rec(expr, fd, cr, color, area, divisions+1);
+        draw_implicit_rec(expr, fd, cr, color, area, divisions+1, vbuf, hbuf, buf_valid);
+        // Bottom right box
         area[0] = xm; area[1] = x1; area[2] = y0; area[3] = ym;
-        draw_implicit_rec(expr, fd, cr, color, area, divisions+1);
+        draw_implicit_rec(expr, fd, cr, color, area, divisions+1, vbuf, hbuf+(bufsize>>1), 0x01);
+        // Top left box
         area[0] = x0; area[1] = xm; area[2] = ym; area[3] = y1;
-        draw_implicit_rec(expr, fd, cr, color, area, divisions+1);
+        draw_implicit_rec(expr, fd, cr, color, area, divisions+1, vbuf+(bufsize>>1), hbuf, 0x02);
+        // Top right box
         area[0] = xm; area[1] = x1; area[2] = ym; area[3] = y1;
-        draw_implicit_rec(expr, fd, cr, color, area, divisions+1);
+        draw_implicit_rec(expr, fd, cr, color, area, divisions+1, vbuf+(bufsize>>1), hbuf+(bufsize>>1), 0x01);
     }
 }
 
@@ -832,7 +862,15 @@ void draw_implicit(expression *expr, file_data *fd, uint8_t *color, cairo_t *cr)
     if (expr->func->oper == func_equals) expr->func->oper = func_sub;
     else if (expr->func->oper == func_compare_single) expr->func->oper = func_compare_sub_single;
     else if (expr->func->oper == func_compare) expr->func->oper = func_compare_sub;
-    draw_implicit_rec(expr, fd, cr, color, temp, 0);
+    double *vbuf = malloc(sizeof(double)*((1<<PLOT_IMPLICIT_MAXDEPTH)+1));
+    double *hbuf = malloc(sizeof(double)*((1<<PLOT_IMPLICIT_MAXDEPTH)+1));
+    for (uint32_t i=0; i <= (1<<PLOT_IMPLICIT_MAXDEPTH); i++) {
+        vbuf[i] = NAN;
+        hbuf[i] = NAN;
+    }
+    draw_implicit_rec(expr, fd, cr, color, temp, 0, vbuf, hbuf, 0x00);
+    free(vbuf);
+    free(hbuf);
     expr->func->oper = old_oper;
 }
 

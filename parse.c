@@ -140,6 +140,8 @@ expression new_expression(variable *var, function *func, expression **dependenci
     expr.value_type = 0;
     expr.color_pointer = NULL;
     expr.cache_size = -1;
+    expr.special_points = NULL;
+    expr.n_special_points = 0;
     return expr;
 }
 
@@ -1694,10 +1696,10 @@ expression *parse_file(file_data *fd, char *stringbuf) {
                         }
                         if (!already_exists && (line[j] == 'x')) has_xy |= 0x01;
                         if (!already_exists && (line[j] == 'y')) has_xy |= 0x02;
-                        /*if (!already_exists && ((line[j] == 'x') || (line[j] == 'y'))) {
-                            exprpos->flags |= EXPRESSION_PLOTTABLE;
-                            exprpos->flags &= ~EXPRESSION_FIXED;
-                        }*/
+                        //if (!already_exists && ((line[j] == 'x') || (line[j] == 'y'))) {
+                        //    exprpos->flags |= EXPRESSION_PLOTTABLE;
+                        //    exprpos->flags &= ~EXPRESSION_FIXED;
+                        //}
                     }
                     
                     j = subscript-1;
@@ -1879,16 +1881,16 @@ expression *parse_file(file_data *fd, char *stringbuf) {
                 function_list[i].next_arg, function_list[i].oper, opername, function_list[i].inter, function_list[i].value, function_list[i].value_type);
     }
 
-    FILE *fp = fopen("/tmp/function_list", "w");
-    fwrite(&function_list, sizeof(int64_t), 1, fp);
-    fwrite(function_list, sizeof(function), func_pos, fp);
-    fclose(fp);
+    //FILE *fp = fopen("/tmp/function_list", "w");
+    //fwrite(&function_list, sizeof(int64_t), 1, fp);
+    //fwrite(function_list, sizeof(function), func_pos, fp);
+    //fclose(fp);
     
-    expression **deptable_inv = malloc(deptable_ofs*sizeof(expression*));
+    //expression **deptable_inv = malloc(deptable_ofs*sizeof(expression*));
     // Use topological sort to determine the order in which variable and function assignments must be evaluated.
     for (i=0; i < deptable_ofs; i++) 
         deptable[i]->num_dependents++;
-    uint32_t deptable_inv_ofs = 0;
+    /*uint32_t deptable_inv_ofs = 0;
     for (i=0; i < n_expr; i++) {
         expression_list[i].dependents = deptable_inv + deptable_inv_ofs;
         deptable_inv_ofs += expression_list[i].num_dependents;
@@ -1898,9 +1900,9 @@ expression *parse_file(file_data *fd, char *stringbuf) {
             expression_list[i].dependencies[j]->dependents[0] = expression_list+i;
             expression_list[i].dependencies[j]->dependents++;
         }
-    }
+    }*/
     for (i=0; i < n_expr; i++) {
-        expression_list[i].dependents -= expression_list[i].num_dependents;
+        //expression_list[i].dependents -= expression_list[i].num_dependents;
         if (expression_list[i].num_dependencies > 0) {
             printf("%p (%03d)\n", expression_list+i, i+1);
             for (int j=0; j < expression_list[i].num_dependencies; j++) {
@@ -1908,7 +1910,7 @@ expression *parse_file(file_data *fd, char *stringbuf) {
             }
         }
     }
-    printf("Inverse table\n");
+    /*printf("Inverse table\n");
     for (i=0; i < n_expr; i++) {
         if (expression_list[i].num_dependents > 0) {
             printf("%p (%03d) (%p)\n", expression_list+i, i+1, expression_list[i].dependents);
@@ -1917,7 +1919,7 @@ expression *parse_file(file_data *fd, char *stringbuf) {
             }
         }
     }
-    free(deptable_inv);
+    free(deptable_inv);*/
     for (i=0; i < n_expr; i++) {
         printf("%d expressions depend on %p\n", expression_list[i].num_dependents, expression_list+i);
     }
