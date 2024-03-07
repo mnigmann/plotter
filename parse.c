@@ -9,16 +9,18 @@
 #include <math.h>
 #include <time.h>
 
-#define N_FUNCTIONS 22
+#define N_FUNCTIONS 27
 const char *function_names[N_FUNCTIONS] = {
     "arctan",       "cos",          "sin",          "mod",          "floor",        "polygon",      "total",        "distance",
     "rgb",          "max",          "abs",          "sort",         "join",         "length",       "solve",        "eigvals",
-    "unique",       "onkeypress",   "color",        "round",        "rref",         "sign"
+    "unique",       "onkeypress",   "color",        "round",        "rref",         "sign",         "ln",           "exp",
+    "arcsin",       "det",          "tan"
 };
 uint32_t (*function_pointers[N_FUNCTIONS])(void*, double*) = {
     func_arctan,    func_cosine,    func_sine,      func_mod,       func_floor,     func_polygon,   func_total,     func_distance,
     func_rgb,       func_max,       func_abs,       func_sort,      func_join,      func_length,    func_solve,     func_eigvals,
-    func_unique,    func_onkeypress,func_color,     func_round,     func_rref,      func_sign
+    func_unique,    func_onkeypress,func_color,     func_round,     func_rref,      func_sign,      func_log,       func_exp,
+    func_arcsin,    func_det,       func_tangent
 };
 
 int extract_braces(char* latex, int start) {
@@ -155,9 +157,9 @@ void shift_blocks(function *function_list, uint32_t start, uint32_t num) {
     }
 }
 
-int insert_product_term(function *function_list, uint32_t last_pos, uint32_t func_pos) {
+int insert_product_term(function *function_list, uint32_t last_pos, uint32_t func_pos, uint32_t init_pos) {
     if (func_pos) {
-        if (last_pos == 0) {
+        if (last_pos == init_pos) {
             // If last_pos is zero but func_pos is not, then one product term has already been
             // inserted. Thus, we must insert a multiplication block
             shift_blocks(function_list, last_pos, func_pos-last_pos);
@@ -219,6 +221,21 @@ void print_object_short(uint32_t type, double *pos) {
         }
     }
     if (type & TYPE_LIST) printf("]");
+}
+
+void print_function_table(function *function_list, int func_pos) {
+    char *opername;
+    for (int i=0; i < func_pos; i++) {
+        opername = oper_lookup(function_list[i].oper)->name;
+        if (function_list[i].value_type & 0x40) printf("%02d %p: first_arg: %p, next_arg: %p, oper: %p (%s), value: %p (%s), value_type: %08x\n", i, function_list+i,
+                function_list[i].first_arg, function_list[i].next_arg, function_list[i].oper, opername, function_list[i].value, ((variable*)(function_list[i].value))->name,
+                function_list[i].value_type);
+        else if (function_list[i].oper == func_value) printf("%02d %p: first_arg: %p, next_arg: %p, oper: %p (%s), value: %p (%f), value_type: %08x\n", i, function_list+i,
+                function_list[i].first_arg, function_list[i].next_arg, function_list[i].oper, opername, function_list[i].value, ((double*)(function_list[i].value))[0],
+                function_list[i].value_type);
+        else printf("%02d %p: first_arg: %p, next_arg: %p, oper: %p (%s), inter %p, value: %p, value_type: %08x\n", i, function_list+i, function_list[i].first_arg, 
+                function_list[i].next_arg, function_list[i].oper, opername, function_list[i].inter, function_list[i].value, function_list[i].value_type);
+    }
 }
 
 /*
@@ -495,27 +512,38 @@ L_{endpoints}=N_{c}\left[A_{pindex}\left(
  *  * the expression is a point or list of points
  */
 
-#define PARSE_LATEX_REC(_latex, _end, _function_list) parse_latex_rec(_latex, _end, _function_list, stack, variable_list, stringbuf, stack_size, var_size, string_size, &flags)
+uint32_t (*extract_function_call(char *cmd_start, uint32_t cmd_len))(void*, double*) {
+    for (int i=0; i < N_FUNCTIONS; i++) {
+        if ((cmd_len == strlen(function_names[i])) && (strncmp(cmd_start, function_names[i], cmd_len) == 0)) {
+            return function_pointers[i];
+        }
+    }
+    return NULL;
+}
 
-int parse_latex_rec(char *latex, int end, function *function_list, double *stack, variable *variable_list, char *stringbuf, int *stack_size, int *var_size, int *string_size, uint8_t *result_flags) {
+#define PARSE_LATEX_REC(_latex, _end) parse_latex_rec(_latex, _end, function_list, stack, variable_list, stringbuf, func_pos, stack_size, var_size, string_size, &flags)
+
+int parse_latex_rec(char *latex, int end, function *function_list, double *stack, variable *variable_list, char *stringbuf, int *func_pos, int *stack_size, int *var_size, int *string_size, uint8_t *result_flags) {
     printf("Parsing %.*s\n", end, latex);
     
     if (end == 0) return 0;
 
     // Check if the expression is an ellipsis
     if (end == 3 && strncmp(latex, "...", 3) == 0) {
-        function_list[0] = new_function(func_ellipsis, NULL, NULL);
-        return 1;
+        function_list[*func_pos] = new_function(func_ellipsis, NULL, NULL);
+        (*func_pos)++;
+        return 0;
     }
     // Check if the expression is a constant
     double value = 0;
     int double_len = extract_double(latex, 0, &value);
     if (double_len+1 == end) {
         stack[*stack_size] = value;
-        function_list[0] = new_value(stack+(*stack_size), (1<<8), NULL);
+        function_list[*func_pos] = new_value(stack+(*stack_size), (1<<8), NULL);
         *stack_size += 1;
         printf("Found constant %f\n", value);
-        return 1;
+        (*func_pos)++;
+        return 0;
     }
 
     int last_term = 0;
@@ -523,11 +551,11 @@ int parse_latex_rec(char *latex, int end, function *function_list, double *stack
     uint8_t n_leftright = 0;
     uint8_t n_braces = 0;
     uint32_t n_terms = 0;
-    int func_pos = 0;
     int last_pos = 0;
     uint8_t flags;
     int subscript, superscript, start;
     int cmd_end, cmd_len, cmd_start, arg1_end, arg1_start, arg2_end, arg2_start;
+    int init_pos = *func_pos;
 
     // Decompose commas
     last_term = 0;
@@ -535,16 +563,16 @@ int parse_latex_rec(char *latex, int end, function *function_list, double *stack
         i = get_next_match(latex, i, end, ',');
         if (n_terms && (i == -1)) i = end;
         if (i >= 0) {
-            printf("comma term %.*s\n", i - last_term, latex+last_term);
+            printf("comma term %.*s, func_pos %d\n", i - last_term, latex+last_term, *func_pos);
             
             if (n_terms > 0) {
                 // If a term has already been found, chain it
                 printf("Chaining comma term with flags %02x\n", flags);
-                function_list[last_pos].next_arg = function_list + func_pos;
+                function_list[last_pos].next_arg = function_list + *func_pos;
             }
-            last_pos = func_pos;
+            last_pos = *func_pos;
             flags = 0;
-            func_pos += PARSE_LATEX_REC(latex+last_term, i - last_term, function_list+func_pos);
+            PARSE_LATEX_REC(latex+last_term, i - last_term);
             *result_flags |= flags;
             last_term = i+1;
             n_terms++;
@@ -552,8 +580,8 @@ int parse_latex_rec(char *latex, int end, function *function_list, double *stack
     }
     if (n_terms) {
         *result_flags |= PARSE_COMMA;
-        printf("parsing %.*s done, func_pos %d\n", end, latex, func_pos);
-        return func_pos;
+        printf("parsing %.*s done, func_pos %d\n", end, latex, *func_pos);
+        return 0;
     }
 
     // Decompose equality (=)
@@ -561,14 +589,15 @@ int parse_latex_rec(char *latex, int end, function *function_list, double *stack
     n_leftright = 0;
     int index_equals = get_next_match(latex, 0, end, '=');
     if (index_equals >= 0) {
-        function_list[0] = new_function(func_equals, NULL, function_list+1);
-        func_pos++;
-        func_pos += PARSE_LATEX_REC(latex, index_equals, function_list+func_pos);
-        function_list[1].next_arg = function_list + func_pos;
+        function_list[*func_pos] = new_function(func_equals, NULL, function_list+(*func_pos)+1);
+        (*func_pos)++;
+        last_pos = *func_pos;
+        PARSE_LATEX_REC(latex, index_equals);
+        function_list[last_pos].next_arg = function_list + *func_pos;
         index_equals++;
         if (latex[index_equals] == ' ') index_equals++;
-        func_pos += PARSE_LATEX_REC(latex+index_equals, end-index_equals, function_list+func_pos);
-        return func_pos;
+        PARSE_LATEX_REC(latex+index_equals, end-index_equals);
+        return 0;
     }
     index_equals = 0;
     int num_cmp = 0;
@@ -608,28 +637,27 @@ int parse_latex_rec(char *latex, int end, function *function_list, double *stack
         } else arg1_start = -1;
         if (arg1_start >= 0) {
             if (num_cmp == 0) {
-                *stack_size += 1;
-                function_list[0] = new_function(func_compare, NULL, function_list+1);
-                func_pos = 1;
+                function_list[*func_pos] = new_function(func_compare, NULL, function_list+(*func_pos)+1);
+                (*func_pos)++;
             } else {
-                function_list[last_pos].next_arg = function_list+func_pos;
+                function_list[last_pos].next_arg = function_list+*func_pos;
             }
             printf("found comparison term %.*s, %016llx\n", i-arg1_start, latex+arg1_start, cmp_type);
-            last_pos = func_pos;
-            func_pos += PARSE_LATEX_REC(latex+arg1_start, i - arg1_start, function_list+func_pos);
+            last_pos = *func_pos;
+            PARSE_LATEX_REC(latex+arg1_start, i - arg1_start);
             num_cmp++;
         }
     }
     if (num_cmp) {
         printf("Comparison chain found with %016llx, %d terms\n", cmp_type, num_cmp);
-        function_list[last_pos].next_arg = function_list+func_pos;
-        last_pos = func_pos;
-        func_pos += PARSE_LATEX_REC(latex+arg2_start, end - arg2_start, function_list+func_pos);
-        if (num_cmp == 1) function_list[0].oper = func_compare_single;
+        function_list[last_pos].next_arg = function_list+*func_pos;
+        last_pos = *func_pos;
+        PARSE_LATEX_REC(latex+arg2_start, end - arg2_start);
+        if (num_cmp == 1) function_list[init_pos].oper = func_compare_single;
         *((uint64_t*)(stack+*stack_size)) = cmp_type;
-        function_list[0].value = stack+*stack_size;
+        function_list[init_pos].value = stack+*stack_size;
         *stack_size += 1;
-        return func_pos;
+        return 0;
     }
 
 
@@ -644,15 +672,16 @@ int parse_latex_rec(char *latex, int end, function *function_list, double *stack
             n_leftright--;
             i += 5;
         } else if ((strncmp(latex+i, "\\to", 3) == 0) && (n_leftright == 0) && (n_braces == 0)) {
-            function_list[0] = new_function(func_assign, NULL, function_list+1);
-            func_pos++;
-            func_pos += PARSE_LATEX_REC(latex, i, function_list+func_pos);
-            function_list[1].next_arg = function_list + func_pos;
+            function_list[*func_pos] = new_function(func_assign, NULL, function_list+1);
+            (*func_pos)++;
+            last_pos = *func_pos;
+            PARSE_LATEX_REC(latex, i);
+            function_list[last_pos].next_arg = function_list + *func_pos;
             i += 3;
             if (latex[i] == ' ') i++;
-            func_pos += PARSE_LATEX_REC(latex+i, end-i, function_list+func_pos);
+            PARSE_LATEX_REC(latex+i, end-i);
             *result_flags |= PARSE_ACTION;
-            return func_pos;
+            return 0;
         }
     }
         
@@ -670,18 +699,18 @@ int parse_latex_rec(char *latex, int end, function *function_list, double *stack
             i += 5;
         } else if (((latex[i] == '+') || (latex[i] == '-')) && (n_leftright == 0) && (n_braces == 0)) {
             if (n_terms == 0) {
-                function_list[0] = new_function(func_add, NULL, NULL);
-                last_pos = 0;
-                func_pos++;
+                function_list[*func_pos] = new_function(func_add, NULL, NULL);
+                last_pos = *func_pos;
+                (*func_pos)++;
             }
             if (subtract) printf("subtract %.*s\n", i - last_term, latex+last_term);
             else printf("add %.*s\n", i - last_term, latex+last_term);
             
-            if (last_pos == 0) function_list[last_pos].first_arg = function_list + func_pos;
-            else function_list[last_pos].next_arg = function_list + func_pos;
-            last_pos = func_pos;
+            if (n_terms == 0) function_list[last_pos].first_arg = function_list + *func_pos;
+            else function_list[last_pos].next_arg = function_list + *func_pos;
+            last_pos = *func_pos;
             
-            func_pos += PARSE_LATEX_REC(latex+last_term, i - last_term, function_list+func_pos);
+            PARSE_LATEX_REC(latex+last_term, i - last_term);
             if (subtract) function_list[last_pos].value_type ^= 0x80;
             subtract = (latex[i] == '-' ? 1 : 0);
             last_term = i+1;
@@ -693,13 +722,13 @@ int parse_latex_rec(char *latex, int end, function *function_list, double *stack
         if (subtract) printf("subtract (final) %.*s\n", end - last_term, latex+last_term);
         else printf("add (final) %.*s\n", end - last_term, latex+last_term);
         
-        function_list[last_pos].next_arg = function_list + func_pos;
-        last_pos = func_pos;
+        function_list[last_pos].next_arg = function_list + *func_pos;
+        last_pos = *func_pos;
             
-        func_pos += PARSE_LATEX_REC(latex+last_term, end - last_term, function_list+func_pos);
+        PARSE_LATEX_REC(latex+last_term, end - last_term);
         if (subtract) function_list[last_pos].value_type ^= 0x80;
-        printf("parsing %.*s done, func_pos %d\n", end, latex, func_pos);
-        return func_pos;
+        printf("parsing %.*s done, func_pos %d\n", end, latex, *func_pos);
+        return 0;
     }
     
     // Decompose multiplication
@@ -722,53 +751,48 @@ int parse_latex_rec(char *latex, int end, function *function_list, double *stack
     printf("Decomposing multiplication\n");
     uint8_t in_command = 0;
     int idx_end = 0;
-    func_pos = 0;
     uint32_t (*oper)(void*, double*);
     for (int i=0; i < end; i++) {
         // Check if the previous term has an index. If it does, we must apply the index by moving
         // the term code down one function block and inserting the index block above it.
-        if ((func_pos > 0) && (i+5 < end) && (strncmp(latex+i, "\\left[", 6) == 0) && ((i < 5) || !(strncmp(latex+i-5, "\\cdot", 5) == 0))) {
+        if ((*func_pos > init_pos) && (i+5 < end) && (strncmp(latex+i, "\\left[", 6) == 0) && ((i < 5) || !(strncmp(latex+i-5, "\\cdot", 5) == 0))) {
             // Variable has an index
             idx_end = extract_brackets(latex, i);
-            printf("Index found at position %d - %d, func_pos %d, last_pos %d\n", i, idx_end, func_pos, last_pos);
+            printf("Index found at position %d - %d, func_pos %d, last_pos %d\n", i, idx_end, *func_pos, last_pos);
             flags = 0;
             // Move the previous term down one block
-            //for (int j=func_pos-1; j >= last_pos; j--) function_list[j+1] = function_list[j];
-            shift_blocks(function_list, last_pos, func_pos-last_pos);
-            func_pos++;
-            // Parse the index
-            uint32_t parsed_length = PARSE_LATEX_REC(latex+i+6, idx_end - i - 12, function_list+func_pos);
-            // Insert index block and chain the term to the index
+            shift_blocks(function_list, last_pos, *func_pos-last_pos);
+            (*func_pos)++;
+            // Insert the index block and chain the term to the index
             function_list[last_pos] = new_function(func_index, function_list[last_pos+1].next_arg, function_list+last_pos+1);
-            function_list[last_pos+1].next_arg = function_list+func_pos;
+            function_list[last_pos+1].next_arg = function_list+*func_pos;
+            // Parse the index
+            last_pos = *func_pos;
+            PARSE_LATEX_REC(latex+i+6, idx_end - i - 12);
             if (flags & PARSE_COMMA) {
                 // The index is a comma-separated list of terms. We need to add in a list block
                 // This is done by shifting the index chain down
-                //for (int j=func_pos+parsed_length-1; j >= func_pos; j--) function_list[j+1] = function_list[j];
-                shift_blocks(function_list, func_pos, parsed_length);
-                function_list[func_pos] = new_function(func_list, NULL, function_list+func_pos+1);
-                func_pos += parsed_length+1;
-            } else {
-                // The index is a single expression and is connected directly to the index block
-                func_pos += parsed_length;
+                shift_blocks(function_list, last_pos, *func_pos-last_pos);
+                (*func_pos)++;
+                function_list[last_pos] = new_function(func_list, NULL, function_list+last_pos+1);
             }
             i = idx_end;
         }
         // Check if the previous term has a superscript
-        else if ((func_pos > 0) && (latex[i] == '^')) {
+        else if ((*func_pos > init_pos) && (latex[i] == '^')) {
             superscript = extract_braces(latex, i+1);
             printf("superscript found %.*s\n", superscript-i-2, latex+i+2);
-            shift_blocks(function_list, last_pos, func_pos-last_pos);
-            func_pos++;
+            shift_blocks(function_list, last_pos, *func_pos-last_pos);
+            (*func_pos)++;
             function_list[last_pos] = new_function(func_exponentiate, function_list[last_pos+1].next_arg, function_list+last_pos+1);
-            function_list[last_pos+1].next_arg = function_list+func_pos;
-            func_pos += PARSE_LATEX_REC(latex+2+i, superscript - i - 2, function_list+func_pos);
+            function_list[last_pos+1].next_arg = function_list + *func_pos;
+            PARSE_LATEX_REC(latex+2+i, superscript - i - 2);
             i = superscript;
         }
         // Check if the previous term has a coordinate (.x or .y)
-        else if ((func_pos > 0) && (latex[i] == '.')) {
-            shift_blocks(function_list, last_pos, func_pos-last_pos);
-            func_pos++;
+        else if ((*func_pos > init_pos) && (latex[i] == '.')) {
+            shift_blocks(function_list, last_pos, *func_pos-last_pos);
+            (*func_pos)++;
             if (latex[i+1] == 'x') {
                 function_list[last_pos] = new_function(func_extract_x, function_list[last_pos+1].next_arg, function_list+last_pos+1);
                 function_list[last_pos+1].next_arg = NULL;
@@ -782,12 +806,13 @@ int parse_latex_rec(char *latex, int end, function *function_list, double *stack
             i ++;
         }
         // Check if the previous term has a factorial
-        else if ((func_pos > 0) && (latex[i] == '!')) {
-            shift_blocks(function_list, last_pos, func_pos-last_pos);
-            func_pos++;
+        else if ((*func_pos > init_pos) && (latex[i] == '!')) {
+            shift_blocks(function_list, last_pos, *func_pos-last_pos);
+            (*func_pos)++;
             function_list[last_pos] = new_function(func_factorial, function_list[last_pos+1].next_arg, function_list+last_pos+1);
             function_list[last_pos+1].next_arg = NULL;
         }
+        // General command parsing
         else if (latex[i] == '\\') {
             cmd_end = i+1;
             while (('a' <= latex[cmd_end]) && (latex[cmd_end] <= 'z')) cmd_end++;
@@ -803,7 +828,13 @@ int parse_latex_rec(char *latex, int end, function *function_list, double *stack
                 printf("Found fraction: %d-%d over %d-%d\n", arg1_start, arg1_end, arg2_start, arg2_end);
                 i = arg2_end;
                 oper = func_div;
-            } else if ((cmd_len == 6) && (strncmp(latex+cmd_start, "arctan", cmd_len)==0)) {
+            } else if ((oper = extract_function_call(latex+cmd_start, cmd_len)) != NULL) {
+                arg1_end = extract_parenthetical(latex, cmd_end);
+                printf("general function %.*s\n", arg1_end - cmd_end - 12, latex+cmd_end+6);
+                i = arg1_end;
+                arg1_end -= 6;
+                arg1_start = cmd_end+6;
+            } /*else if ((cmd_len == 6) && (strncmp(latex+cmd_start, "arctan", cmd_len)==0)) {
                 arg1_end = extract_parenthetical(latex, cmd_end);
                 printf("multiply arctangent %.*s\n", arg1_end - cmd_end - 12, latex+cmd_end+6);
                 i = arg1_end;
@@ -880,7 +911,7 @@ int parse_latex_rec(char *latex, int end, function *function_list, double *stack
                 arg1_end -= 6;
                 arg1_start = cmd_end + 6;
                 oper = func_min;
-            } else if (((strncmp(latex+cmd_start, "sum", cmd_len) == 0) && (cmd_len == 3)) || ((strncmp(latex+cmd_start, "prod", cmd_len) == 0) && (cmd_len == 4))) {
+            }*/ else if (((strncmp(latex+cmd_start, "sum", cmd_len) == 0) && (cmd_len == 3)) || ((strncmp(latex+cmd_start, "prod", cmd_len) == 0) && (cmd_len == 4))) {
                 // Sums have three parts: a definition, an end point, and an expression to be summed
                 // We assume that the entire remaining expression is the sum
                 i = cmd_end;
@@ -891,19 +922,19 @@ int parse_latex_rec(char *latex, int end, function *function_list, double *stack
                 printf("Variable is %.*s\n", arg1_end-i-2, latex+i+2);
                 printf("Initial value is %.*s\n", subscript-arg1_end-1, latex+arg1_end+1);
                 printf("Final value is %.*s\n", superscript-subscript-3, latex+subscript+3);
-                func_pos = insert_product_term(function_list, last_pos, func_pos);
-                last_pos = func_pos;
-                if (strncmp(latex+cmd_start, "sum", cmd_len) == 0) function_list[func_pos] = new_function(func_sum, NULL, function_list+func_pos+1);
-                else function_list[func_pos] = new_function(func_prod, NULL, function_list+func_pos+1);
-                func_pos++;
-                function_list[func_pos] = new_value(NULL, 0x40, function_list+func_pos+1);
-                func_pos++;
-                int prev = func_pos;
-                func_pos += PARSE_LATEX_REC(latex+arg1_end+1, subscript-arg1_end-1, function_list+func_pos);
-                function_list[prev].next_arg = function_list + func_pos;
-                prev = func_pos;
-                func_pos += PARSE_LATEX_REC(latex+subscript+3, superscript-subscript-3, function_list+func_pos);
-                function_list[prev].next_arg = function_list + func_pos;
+                *func_pos = insert_product_term(function_list, last_pos, *func_pos, init_pos);
+                last_pos = *func_pos;
+                if (strncmp(latex+cmd_start, "sum", cmd_len) == 0) function_list[*func_pos] = new_function(func_sum, NULL, function_list + *func_pos + 1);
+                else function_list[*func_pos] = new_function(func_prod, NULL, function_list + *func_pos + 1);
+                (*func_pos)++;
+                function_list[*func_pos] = new_value(NULL, 0x40, function_list + *func_pos + 1);
+                (*func_pos)++;
+                int prev = *func_pos;
+                PARSE_LATEX_REC(latex+arg1_end+1, subscript-arg1_end-1);
+                function_list[prev].next_arg = function_list + *func_pos;
+                prev = *func_pos;
+                PARSE_LATEX_REC(latex+subscript+3, superscript-subscript-3);
+                function_list[prev].next_arg = function_list + *func_pos;
                 // Create a new variable for the summation index
                 strncpy(stringbuf + *string_size, latex+i+2, arg1_end-i-2);
                 variable_list[*var_size] = new_variable(stringbuf + *string_size, 0, VARIABLE_IN_SCOPE, NULL);
@@ -911,10 +942,10 @@ int parse_latex_rec(char *latex, int end, function *function_list, double *stack
                 *string_size += arg1_end-1;
                 *var_size += 1;
                 // Parse the expression
-                func_pos += PARSE_LATEX_REC(latex+superscript+1, end-superscript-1, function_list+func_pos);
+                PARSE_LATEX_REC(latex+superscript+1, end-superscript-1);
                 variable_list[*var_size-1].flags &= ~VARIABLE_IN_SCOPE;
-                printf("parsing %.*s done, func_pos %d\n", end, latex, func_pos);
-                return func_pos;
+                printf("parsing %.*s done, func_pos %d\n", end, latex, *func_pos);
+                return 0;
             } else if ((strncmp(latex+cmd_start, "int", cmd_len) == 0) && (cmd_len == 3)) {
                 // Integrals have three parts: a start value, an end value, an expression to be summed,
                 // and an integration variable (like a dx, du, dt, etc.)
@@ -945,20 +976,20 @@ int parse_latex_rec(char *latex, int end, function *function_list, double *stack
                 printf("Variable is %.*s\n", end-arg1_start-1, latex+arg1_start+1);
                 printf("Initial value is %.*s\n", subscript-i-2, latex+i+2);
                 printf("Final value is %.*s\n", superscript-subscript-3, latex+subscript+3);
-                last_pos = func_pos;
-                function_list[func_pos] = new_function(func_integrate_gsl, NULL, function_list+func_pos+1);
-                func_pos++;
+                last_pos = *func_pos;
+                function_list[*func_pos] = new_function(func_integrate_gsl, NULL, function_list + *func_pos + 1);
+                (*func_pos)++;
                 // Value block for the variable of intgration
-                function_list[func_pos] = new_value(NULL, 0x40, function_list+func_pos+1);
-                func_pos++;
+                function_list[*func_pos] = new_value(NULL, 0x40, function_list + *func_pos + 1);
+                (*func_pos)++;
                 // Parse the lower bound
-                int prev = func_pos;
-                func_pos += PARSE_LATEX_REC(latex+i+2, subscript-i-2, function_list+func_pos);
-                function_list[prev].next_arg = function_list + func_pos;
+                int prev = *func_pos;
+                PARSE_LATEX_REC(latex+i+2, subscript-i-2);
+                function_list[prev].next_arg = function_list + *func_pos;
                 // Parse the upper bound
-                prev = func_pos;
-                func_pos += PARSE_LATEX_REC(latex+subscript+3, superscript-subscript-3, function_list+func_pos);
-                function_list[prev].next_arg = function_list + func_pos;
+                prev = *func_pos;
+                PARSE_LATEX_REC(latex+subscript+3, superscript-subscript-3);
+                function_list[prev].next_arg = function_list + *func_pos;
                 // Create a new variable for the summation index
                 strncpy(stringbuf + *string_size, latex+arg1_start+1, end-arg1_start-1);
                 stringbuf[*string_size + end-arg1_start-1] = 0;
@@ -967,11 +998,11 @@ int parse_latex_rec(char *latex, int end, function *function_list, double *stack
                 *string_size += end-arg1_start;
                 *var_size += 1;
                 // Parse the expression
-                func_pos += PARSE_LATEX_REC(latex+superscript+1, arg1_start-superscript-1, function_list+func_pos);
+                PARSE_LATEX_REC(latex+superscript+1, arg1_start-superscript-1);
                 variable_list[*var_size-1].flags &= ~VARIABLE_IN_SCOPE;
                 function_list[last_pos+1].value = variable_list + (*var_size-1);
-                printf("parsing %.*s done, func_pos %d\n", end, latex, func_pos);
-                return func_pos;
+                printf("parsing %.*s done, func_pos %d\n", end, latex, *func_pos);
+                return 0;
             } else if ((cmd_len == 12) && (strncmp(latex+cmd_start, "operatorname", cmd_len) == 0)) {
                 arg1_end = extract_braces(latex, cmd_start+12);
                 oper = NULL;
@@ -1013,9 +1044,9 @@ int parse_latex_rec(char *latex, int end, function *function_list, double *stack
                         
                         printf("for expression detected: %.*s\n", j-i-6, latex+i+6);
                         // Insert the func_for block
-                        last_pos = func_pos;
-                        function_list[func_pos] = new_function(func_for, NULL, function_list+func_pos+1);
-                        func_pos++;
+                        last_pos = *func_pos;
+                        function_list[*func_pos] = new_function(func_for, NULL, function_list + *func_pos + 1);
+                        (*func_pos)++;
                         // Parse the list of variable definitions
                         start = j;
                         j += 18;
@@ -1043,20 +1074,20 @@ int parse_latex_rec(char *latex, int end, function *function_list, double *stack
                         int new_var_size = *var_size;
                        
                         // Parse the main expression
-                        uint32_t last_term = func_pos;
-                        func_pos += PARSE_LATEX_REC(latex+i+6, start-i-6, function_list+func_pos);
+                        uint32_t last_term = *func_pos;
+                        PARSE_LATEX_REC(latex+i+6, start-i-6);
 
                         // Parse the definitions of the variables
                         // Clear the variables and take them out of scope
                         for (j=old_var_size; j < new_var_size; j++) {
                             printf("recursing on %p %.*s\n", variable_list[j].pointer, variable_list[j].type, (char*)(variable_list[j].pointer));
-                            function_list[last_term].next_arg = function_list+func_pos;
-                            last_term = func_pos;
-                            function_list[func_pos] = new_function(func_equals, NULL, function_list+func_pos+1);
-                            func_pos++;
-                            function_list[func_pos] = new_value(variable_list+j, 0x40, function_list+func_pos+1);
-                            func_pos++;
-                            func_pos += PARSE_LATEX_REC((char*)(variable_list[j].pointer), variable_list[j].type, function_list+func_pos);
+                            function_list[last_term].next_arg = function_list + *func_pos;
+                            last_term = *func_pos;
+                            function_list[*func_pos] = new_function(func_equals, NULL, function_list + *func_pos + 1);
+                            (*func_pos)++;
+                            function_list[*func_pos] = new_value(variable_list+j, 0x40, function_list + *func_pos + 1);
+                            (*func_pos)++;
+                            PARSE_LATEX_REC((char*)(variable_list[j].pointer), variable_list[j].type);
                             variable_list[j].flags &= ~VARIABLE_IN_SCOPE;
                             variable_list[j].pointer = NULL;
                             variable_list[j].type = 0;
@@ -1078,21 +1109,21 @@ int parse_latex_rec(char *latex, int end, function *function_list, double *stack
             } else if ((cmd_len == 4) && (strncmp(latex+cmd_start, "left(", cmd_len+1) == 0)) {
                 arg1_end = extract_parenthetical(latex, cmd_start-1);
                 i = arg1_end;
-                func_pos = insert_product_term(function_list, last_pos, func_pos);
-                last_pos = func_pos;
+                *func_pos = insert_product_term(function_list, last_pos, *func_pos, init_pos);
+                last_pos = *func_pos;
                 flags = 0;
-                func_pos += PARSE_LATEX_REC(latex+cmd_start+5, arg1_end - cmd_start - 11, function_list+func_pos);
+                PARSE_LATEX_REC(latex+cmd_start+5, arg1_end - cmd_start - 11);
                 printf("Comma or action chain: %02x\n", flags);
                 if (flags & PARSE_ACTION) {
-                    shift_blocks(function_list, last_pos, func_pos-last_pos);
-                    func_pos++;
+                    shift_blocks(function_list, last_pos, *func_pos-last_pos);
+                    (*func_pos)++;
                     function_list[last_pos] = new_function(func_chain_actions, NULL, function_list+last_pos+1);
                     *result_flags |= PARSE_ACTION;
                 }
                 else if (flags & PARSE_COMMA) {
                     printf("parsing point\n");
-                    shift_blocks(function_list, last_pos, func_pos-last_pos);
-                    func_pos++;
+                    shift_blocks(function_list, last_pos, *func_pos-last_pos);
+                    (*func_pos)++;
                     function_list[last_pos] = new_function(func_point, NULL, function_list+last_pos+1);
                 }
                 arg1_end = 0;
@@ -1102,62 +1133,62 @@ int parse_latex_rec(char *latex, int end, function *function_list, double *stack
                 arg1_end = get_next_match(latex, i, end, '|')-6;
                 latex[i+5] = '|';
                 printf("Found absolute value %.*s\n", arg1_end-i-6, latex+i+6);
-                func_pos = insert_product_term(function_list, last_pos, func_pos);
-                last_pos = func_pos;
-                function_list[func_pos] = new_function(func_abs, NULL, function_list+func_pos+1);
-                func_pos++;
-                func_pos += PARSE_LATEX_REC(latex+i+6, arg1_end-i-6, function_list+func_pos);
+                *func_pos = insert_product_term(function_list, last_pos, *func_pos, init_pos);
+                last_pos = *func_pos;
+                function_list[*func_pos] = new_function(func_abs, NULL, function_list + *func_pos + 1);
+                (*func_pos)++;
+                PARSE_LATEX_REC(latex+i+6, arg1_end-i-6);
                 i = arg1_end+6;
                 arg1_end = 0;
                 arg2_end = 0;
             } else if ((cmd_len == 4) && (strncmp(latex+cmd_start, "left\\{", cmd_len+2) == 0)) {
                 arg1_end = extract_braces(latex, cmd_start+5);
                 printf("Found conditional from %d to %d: %.*s\n", cmd_start+6, arg1_end-7, arg1_end-cmd_start-13, latex+cmd_start+6);
-                func_pos = insert_product_term(function_list, last_pos, func_pos);
-                last_pos = func_pos;
-                function_list[func_pos] = new_function(func_conditional, NULL, function_list+func_pos+1);
-                func_pos++;
+                *func_pos = insert_product_term(function_list, last_pos, *func_pos, init_pos);
+                last_pos = *func_pos;
+                function_list[*func_pos] = new_function(func_conditional, NULL, function_list + *func_pos + 1);
+                (*func_pos)++;
                 i = cmd_start+5;
                 uint8_t chain = 0;
                 uint32_t old_pos = 0;
                 while (1>0) {
                     arg2_start = get_next_match(latex, i+1, arg1_end-7, ':');
                     if (arg2_start < 0) break;
-                    printf("colon found at %d, %p\n", arg2_start, function_list+func_pos);
-                    if (chain) function_list[old_pos].next_arg = function_list + func_pos;
+                    printf("colon found at %d, %p\n", arg2_start, function_list + *func_pos);
+                    if (chain) function_list[old_pos].next_arg = function_list + *func_pos;
                     chain = 1;
-                    old_pos = func_pos;
+                    old_pos = *func_pos;
                     flags=0;
-                    func_pos += PARSE_LATEX_REC(latex+i+1, arg2_start-i-1, function_list+func_pos);
+                    PARSE_LATEX_REC(latex+i+1, arg2_start-i-1);
                     *result_flags |= flags;
                     i = get_next_match(latex, arg2_start, arg1_end-7, ',');
                     if (i < 0) break;
-                    printf("comma found at %d, %p\n", i, function_list+func_pos);
-                    function_list[old_pos].next_arg = function_list + func_pos;
-                    old_pos = func_pos;
+                    printf("comma found at %d, %p\n", i, function_list + *func_pos);
+                    function_list[old_pos].next_arg = function_list + *func_pos;
+                    old_pos = *func_pos;
                     flags = 0;
-                    func_pos += PARSE_LATEX_REC(latex+arg2_start+1, i-arg2_start-1, function_list+func_pos);
+                    PARSE_LATEX_REC(latex+arg2_start+1, i-arg2_start-1);
                     if ((flags & PARSE_ACTION) && (function_list[old_pos].oper != func_chain_actions)) {
                         // If the parsed result is a single action, it must be wrapped
-                        shift_blocks(function_list, old_pos, func_pos-old_pos);
-                        func_pos++;
+                        shift_blocks(function_list, old_pos, *func_pos-old_pos);
+                        (*func_pos)++;
                         function_list[old_pos] = new_function(func_chain_actions, NULL, function_list+old_pos+1);
                     }
                     *result_flags |= flags;
                 }
                 // Failed to find colon, last separator is comma, ends with a default expression
                 if (arg2_start < 0) {
-                    function_list[old_pos].next_arg = function_list + func_pos;
-                    old_pos = func_pos;
+                    function_list[old_pos].next_arg = function_list + *func_pos;
+                    old_pos = *func_pos;
                     flags = 0;
-                    func_pos += PARSE_LATEX_REC(latex+i+1, arg1_end-i-8, function_list+func_pos);
+                    PARSE_LATEX_REC(latex+i+1, arg1_end-i-8);
                     *result_flags |= flags;
                 } 
                 // Failed to find comma, last separator is colon, ends with no default expression
                 else {
-                    function_list[old_pos].next_arg = function_list + func_pos;
-                    old_pos = func_pos;
-                    func_pos += PARSE_LATEX_REC(latex+arg2_start+1, arg1_end-arg2_start-8, function_list+func_pos);
+                    function_list[old_pos].next_arg = function_list + *func_pos;
+                    old_pos = *func_pos;
+                    PARSE_LATEX_REC(latex+arg2_start+1, arg1_end-arg2_start-8);
                     *result_flags |= flags;
                 }
                 printf("result flags are %02x\n", *result_flags);
@@ -1199,21 +1230,21 @@ int parse_latex_rec(char *latex, int end, function *function_list, double *stack
                     // declaration
                     arg1_end = extract_parenthetical(latex, cmd_end);
                     printf("multiply %.*s at %d with argument %.*s\n", cmd_len+1, latex+cmd_start-1, varindex, arg1_end-cmd_end+1, latex+cmd_end);
-                    func_pos = insert_product_term(function_list, last_pos, func_pos);
-                    function_list[func_pos] = new_function(func_user_defined, NULL, function_list+func_pos+1);
-                    function_list[func_pos].value = variable_list+varindex;
-                    last_pos = func_pos;
-                    func_pos++;
-                    func_pos += PARSE_LATEX_REC(latex+cmd_end+6, arg1_end-cmd_end-12, function_list+func_pos);
+                    *func_pos = insert_product_term(function_list, last_pos, *func_pos, init_pos);
+                    function_list[*func_pos] = new_function(func_user_defined, NULL, function_list + *func_pos + 1);
+                    function_list[*func_pos].value = variable_list+varindex;
+                    last_pos = *func_pos;
+                    (*func_pos)++;
+                    PARSE_LATEX_REC(latex+cmd_end+6, arg1_end-cmd_end-12);
                     i = arg1_end;
                 } else {
                     // Variable found
-                    printf("multiply %.*s at %d, func_pos %d\n", cmd_len+1, latex+cmd_start-1, varindex, func_pos);
-                    func_pos = insert_product_term(function_list, last_pos, func_pos);
-                    printf("func_pos %d\n", func_pos);
-                    function_list[func_pos] = new_value(variable_list+varindex, 0x40, NULL);
-                    last_pos = func_pos;
-                    func_pos++;
+                    printf("multiply %.*s at %d, func_pos %d\n", cmd_len+1, latex+cmd_start-1, varindex, *func_pos);
+                    *func_pos = insert_product_term(function_list, last_pos, *func_pos, init_pos);
+                    printf("func_pos %d\n", *func_pos);
+                    function_list[*func_pos] = new_value(variable_list+varindex, 0x40, NULL);
+                    last_pos = *func_pos;
+                    (*func_pos)++;
                     i = cmd_end-1;
                 }
                 arg1_end = 0;
@@ -1221,22 +1252,22 @@ int parse_latex_rec(char *latex, int end, function *function_list, double *stack
             }
             if (arg2_end) {
                 // Function decomposition for two arguments
-                func_pos = insert_product_term(function_list, last_pos, func_pos);
-                function_list[func_pos] = new_function(oper, NULL, function_list+func_pos+1);
-                last_pos = func_pos;
-                func_pos++;
-                func_pos += PARSE_LATEX_REC(latex+arg1_start, arg1_end - arg1_start, function_list+func_pos);
-                function_list[last_pos+1].next_arg = function_list + func_pos;
-                func_pos += PARSE_LATEX_REC(latex+arg2_start, arg2_end - arg2_start, function_list+func_pos);
+                *func_pos = insert_product_term(function_list, last_pos, *func_pos, init_pos);
+                function_list[*func_pos] = new_function(oper, NULL, function_list + *func_pos + 1);
+                last_pos = *func_pos;
+                (*func_pos)++;
+                PARSE_LATEX_REC(latex+arg1_start, arg1_end - arg1_start);
+                function_list[last_pos+1].next_arg = function_list + *func_pos;
+                PARSE_LATEX_REC(latex+arg2_start, arg2_end - arg2_start);
             } else if (arg1_end) {
                 // Function decomposition for one argument
-                func_pos = insert_product_term(function_list, last_pos, func_pos);
-                function_list[func_pos] = new_function(oper, NULL, function_list+func_pos+1);
-                last_pos = func_pos;
-                func_pos++;
-                func_pos += PARSE_LATEX_REC(latex+arg1_start, arg1_end - arg1_start, function_list+func_pos);
+                *func_pos = insert_product_term(function_list, last_pos, *func_pos, init_pos);
+                function_list[*func_pos] = new_function(oper, NULL, function_list + *func_pos + 1);
+                last_pos = *func_pos;
+                (*func_pos)++;
+                PARSE_LATEX_REC(latex+arg1_start, arg1_end - arg1_start);
                 // For empty lists
-                if (last_pos+1 == func_pos) function_list[last_pos].first_arg = NULL;
+                if (last_pos+1 == *func_pos) function_list[last_pos].first_arg = NULL;
             }
         }
         else if ((('a' <= latex[i]) && (latex[i] <= 'z')) || (('A' <= latex[i]) && (latex[i] <= 'Z'))) {
@@ -1253,14 +1284,14 @@ int parse_latex_rec(char *latex, int end, function *function_list, double *stack
             }
             if (subscript == 0) subscript = start;
             if (superscript) {
-                func_pos = insert_product_term(function_list, last_pos, func_pos);
-                function_list[func_pos] = new_function(func_exponentiate, NULL, function_list+func_pos+1);
-                last_pos = func_pos;
-                func_pos++;
+                *func_pos = insert_product_term(function_list, last_pos, *func_pos, init_pos);
+                function_list[*func_pos] = new_function(func_exponentiate, NULL, function_list + *func_pos + 1);
+                last_pos = *func_pos;
+                (*func_pos)++;
                 printf("multiply %.*s to the power of %.*s\n", subscript-start+1, latex+start, superscript-subscript-3, latex+subscript+3);
-                func_pos += PARSE_LATEX_REC(latex+start, subscript-start+1, function_list+func_pos);
-                function_list[last_pos+1].next_arg = function_list + func_pos;
-                func_pos += PARSE_LATEX_REC(latex+subscript+3, superscript-subscript-3, function_list+func_pos);
+                PARSE_LATEX_REC(latex+start, subscript-start+1);
+                function_list[last_pos+1].next_arg = function_list + *func_pos;
+                PARSE_LATEX_REC(latex+subscript+3, superscript-subscript-3);
             } else {
                 // Multiply by a single variable or function
                 int varindex = -1;
@@ -1293,31 +1324,31 @@ int parse_latex_rec(char *latex, int end, function *function_list, double *stack
                     // declaration
                     arg1_end = extract_parenthetical(latex, subscript+1);
                     printf("multiply %.*s at %d with argument %.*s\n", subscript-start+1, latex+start, varindex, arg1_end-subscript, latex+subscript+1);
-                    func_pos = insert_product_term(function_list, last_pos, func_pos);
-                    function_list[func_pos] = new_function(func_user_defined, NULL, function_list+func_pos+1);
-                    function_list[func_pos].value = variable_list+varindex;
-                    last_pos = func_pos;
-                    func_pos++;
-                    func_pos += PARSE_LATEX_REC(latex+subscript+7, arg1_end-subscript-13, function_list+func_pos);
+                    *func_pos = insert_product_term(function_list, last_pos, *func_pos, init_pos);
+                    function_list[*func_pos] = new_function(func_user_defined, NULL, function_list + *func_pos + 1);
+                    function_list[*func_pos].value = variable_list+varindex;
+                    last_pos = *func_pos;
+                    (*func_pos)++;
+                    PARSE_LATEX_REC(latex+subscript+7, arg1_end-subscript-13);
                     i = arg1_end;
                 } else {
                     // Variable found
-                    printf("multiply %.*s at %d, func_pos %d\n", subscript-start+1, latex+start, varindex, func_pos);
-                    func_pos = insert_product_term(function_list, last_pos, func_pos);
-                    printf("func_pos %d\n", func_pos);
-                    function_list[func_pos] = new_value(variable_list+varindex, 0x40, NULL);
-                    last_pos = func_pos;
-                    func_pos++;
+                    printf("multiply %.*s at %d, func_pos %d\n", subscript-start+1, latex+start, varindex, *func_pos);
+                    *func_pos = insert_product_term(function_list, last_pos, *func_pos, init_pos);
+                    printf("func_pos %d\n", *func_pos);
+                    function_list[*func_pos] = new_value(variable_list+varindex, 0x40, NULL);
+                    last_pos = *func_pos;
+                    (*func_pos)++;
                 }
             }
         } else if (('0' <= latex[i]) && (latex[i] <= '9')) {
             i = extract_double(latex, i, &value);
-            func_pos = insert_product_term(function_list, last_pos, func_pos);
-            printf("multiply constant %f, stack %d, func_pos %d\n", value, *stack_size, func_pos);
+            *func_pos = insert_product_term(function_list, last_pos, *func_pos, init_pos);
+            printf("multiply constant %f, stack %d, func_pos %d\n", value, *stack_size, *func_pos);
             stack[*stack_size] = value;
-            function_list[func_pos] = new_value(stack + (*stack_size), 1<<8, NULL);
-            last_pos = func_pos;
-            func_pos++;
+            function_list[*func_pos] = new_value(stack + (*stack_size), 1<<8, NULL);
+            last_pos = *func_pos;
+            (*func_pos)++;
             *stack_size += 1;
         }
 
@@ -1333,8 +1364,8 @@ int parse_latex_rec(char *latex, int end, function *function_list, double *stack
     }
     
     
-    printf("parsing %.*s done, func_pos %d\n", end, latex, func_pos);
-    return func_pos;
+    printf("parsing %.*s done, func_pos %d\n", end, latex, *func_pos);
+    return 0;
 }
 
 /*
@@ -1372,6 +1403,7 @@ int parse_latex_rec(char *latex, int end, function *function_list, double *stack
 16 0x10d120480: first_arg: 0x0, next_arg: 0x0, oper: 0x0                                            3
 */
 
+/*
 void parse_latex(char *latex, function *function_list, double *stack, variable *variable_list, char *stringbuf, int *stack_size, int *var_size, int *string_size) {
     // Find all of the variables in the expression
     int end = strlen(latex);
@@ -1386,7 +1418,7 @@ void parse_latex(char *latex, function *function_list, double *stack, variable *
 
     for (i=0; i < *var_size; i++)
         printf("%s variable pointer at %p, points to %p, type %08X\n", variable_list[i].name, &(variable_list[i].pointer), variable_list[i].pointer, variable_list[i].type);
-}
+}*/
 
 expression* topological_sort_rec(expression *start) {
     expression *top = start;
@@ -1729,7 +1761,7 @@ expression *parse_file(file_data *fd, char *stringbuf) {
             last_pos = func_pos;
             int var_size = varpos - variable_list;
             int string_size = stringpos - stringbuf;
-            func_pos += parse_latex_rec(line+i, read-i, function_list+func_pos, stack, variable_list, stringbuf, &stack_size, &var_size, &string_size, &flags);
+            parse_latex_rec(line+i, read-i, function_list, stack, variable_list, stringbuf, &func_pos, &stack_size, &var_size, &string_size, &flags);
             for (int p=last_pos; p < func_pos; p++) {
                 if (function_list[p].oper == func_assign) {
                     exprpos->flags |= EXPRESSION_ACTION;
@@ -1759,8 +1791,8 @@ expression *parse_file(file_data *fd, char *stringbuf) {
             int var_size = varpos - variable_list;
             int string_size = stringpos - stringbuf;
             last_pos = func_pos;
-            func_pos += parse_latex_rec(line+i, read-i, function_list+func_pos, stack, variable_list, stringbuf, &stack_size, &var_size, &string_size, &flags);
-            printf("after parsing, func_pos: %d, string_size: %d, stack_size: %d, var_size: %d\n", func_pos, string_size, stack_size, var_size);
+            parse_latex_rec(line+i, read-i, function_list, stack, variable_list, stringbuf, &func_pos, &stack_size, &var_size, &string_size, &flags);
+            printf("after parsing, func_pos: %d, string_size: %d, stack_size: %d, var_size: %d, last_pos: %d\n", func_pos, string_size, stack_size, var_size, last_pos);
             if ((exprpos->var) && (strcmp(exprpos->var->name, "r") == 0)) {
                 printf("Polar expression found\n");
                 shift_blocks(function_list, last_pos, func_pos-last_pos);
@@ -1830,7 +1862,7 @@ expression *parse_file(file_data *fd, char *stringbuf) {
                 }
             }
             if (no_variables) {
-                printf("Expression %p has no variables, evaluating\n", exprpos);
+                printf("Expression %p has no variables, evaluating and storing to %d\n", exprpos, last_pos);
                 uint32_t argtype = function_list[last_pos].oper(function_list+last_pos, stack+stack_size);
                 double *temp = malloc((argtype>>8)*sizeof(double));
                 memcpy(temp, stack+stack_size, (argtype>>8)*sizeof(double));
@@ -1868,18 +1900,7 @@ expression *parse_file(file_data *fd, char *stringbuf) {
     for (i=0; i < n_expr; i++) validate_interval_functions(expression_list[i].func);
     
     // Print the function table
-    char *opername;
-    for (i=0; i < func_pos; i++) {
-        opername = oper_lookup(function_list[i].oper)->name;
-        if (function_list[i].value_type & 0x40) printf("%02d %p: first_arg: %p, next_arg: %p, oper: %p (%s), value: %p (%s), value_type: %08x\n", i, function_list+i,
-                function_list[i].first_arg, function_list[i].next_arg, function_list[i].oper, opername, function_list[i].value, ((variable*)(function_list[i].value))->name,
-                function_list[i].value_type);
-        else if (function_list[i].oper == func_value) printf("%02d %p: first_arg: %p, next_arg: %p, oper: %p (%s), value: %p (%f), value_type: %08x\n", i, function_list+i,
-                function_list[i].first_arg, function_list[i].next_arg, function_list[i].oper, opername, function_list[i].value, ((double*)(function_list[i].value))[0],
-                function_list[i].value_type);
-        else printf("%02d %p: first_arg: %p, next_arg: %p, oper: %p (%s), inter %p, value: %p, value_type: %08x\n", i, function_list+i, function_list[i].first_arg, 
-                function_list[i].next_arg, function_list[i].oper, opername, function_list[i].inter, function_list[i].value, function_list[i].value_type);
-    }
+    print_function_table(function_list, func_pos);
 
     //FILE *fp = fopen("/tmp/function_list", "w");
     //fwrite(&function_list, sizeof(int64_t), 1, fp);

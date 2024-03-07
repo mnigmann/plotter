@@ -121,7 +121,7 @@ void print_object(uint32_t type, double *pos);
 
 void load_file(char *fname, file_data *fd);
 void evaluate_from(file_data *fd, expression *top_expr);
-int parse_latex_rec(char *latex, int end, function *function_list, double *stack, variable *variable_list, char *stringbuf, int *stack_size, int *var_size, int *string_size, uint8_t *flags);
+int parse_latex_rec(char *latex, int end, function *function_list, double *stack, variable *variable_list, char *stringbuf, int *func_pos, int *stack_size, int *var_size, int *string_size, uint8_t *flags);
 void parse_latex(char *latex, function *function_list, double *stack, variable *variable_list, char *stringbuf, int *stack_size, int *var_size, int *string_size);
 expression* parse_file(file_data *fd, char *stringbuf);
 
