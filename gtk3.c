@@ -332,6 +332,7 @@ void draw_function_constant_ds_rec(expression *expr, file_data *fd, cairo_t *cr,
         eval_func(t_start, &xp, &yp, expr, stackpos);
         cairo_move_to(cr, SCALE_XK(xp), SCALE_YK(yp));
         eval_func(t_start+PLOT_DT_DERIV, &x, &y, expr, stackpos);
+        printf("intial point (%.12f, %.12f), (%.12f, %.12f), (%.12f, %.12f)\n", xpp, ypp, xp, yp, x, y);
         ds = hypot((x-xp)*xscale, (y-yp)*yscale);
         if (ds > PLOT_MAX_ARC_LENGTH*PLOT_DISCONTINUITY_THRESHOLD) {
             //printf("Possible discontinuity between %f and %f: (%f, %f) and (%f, %f)\n", t_start, tp, x, y, xp, yp);
@@ -348,10 +349,10 @@ void draw_function_constant_ds_rec(expression *expr, file_data *fd, cairo_t *cr,
             if ((x == x) && (y == y)) {
                 ds = hypot((x-xp)*xscale, (y-yp)*yscale);
                 dt = PLOT_MAX_ARC_LENGTH*dt/ds;
-                if ((yp > ypp) && (yp > y) && (step >= 2)) {
+                if ((expr->flags & EXPRESSION_EXPLICIT) && (yp > ypp) && (yp > y) && (step >= 1)) {
                     printf("Possible maximum at %f -> (%f, %f)\n", tp, xp, yp);
                     find_extremum(expr, stackpos, t_start, y, tp, yp, tpp, ypp, 1);
-                } else if ((yp < ypp) && (yp < y) && (step >= 2)) {
+                } else if ((expr->flags & EXPRESSION_EXPLICIT) && (yp < ypp) && (yp < y) && (step >= 1)) {
                     printf("Possible minimum at %f -> (%f, %f) > (%f, %f) < (%f, %f)\n", tp, x, y, xp, yp, xpp, ypp);
                     find_extremum(expr, stackpos, t_start, y, tp, yp, tpp, ypp, 0);
                 }
@@ -403,10 +404,10 @@ void draw_function_constant_ds_rec(expression *expr, file_data *fd, cairo_t *cr,
             if ((x == x) && (y == y)) {
                 ds = hypot((x-xp)*xscale, (y-yp)*yscale);
                 dt = PLOT_MAX_ARC_LENGTH*dt/ds;
-                if ((yp > ypp) && (yp > y) && (step >= 2)) {
+                if ((expr->flags & EXPRESSION_EXPLICIT) && (yp > ypp) && (yp > y) && (step >= 1)) {
                     printf("Possible maximum at %f -> (%f, %f) < (%f, %f) > (%f, %f)\n", tp, x, y, xp, yp, xpp, ypp);
                     find_extremum(expr, stackpos, t_end, y, tp, yp, tpp, ypp, 1);
-                } else if ((yp < ypp) && (yp < y) && (step >= 2)) {
+                } else if ((expr->flags & EXPRESSION_EXPLICIT) && (yp < ypp) && (yp < y) && (step >= 1)) {
                     printf("Possible minimum at %f -> (%f, %f) > (%f, %f) < (%f, %f)\n", tp, x, y, xp, yp, xpp, ypp);
                     find_extremum(expr, stackpos, t_end, y, tp, yp, tpp, ypp, 0);
                 }
@@ -487,6 +488,7 @@ void draw_function_constant_ds(expression *expr, file_data *fd, uint8_t *color, 
         t = window_x0;
         t_end = window_x1;
         min_dt = PLOT_MAX_ARC_LENGTH/xscale;
+        expr->flags |= EXPRESSION_EXPLICIT;
     }
     nfev = 0;
     niev = 0;

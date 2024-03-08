@@ -1323,13 +1323,13 @@ uint32_t func_conditional(void *f, double *stackpos) {
     // | result_3 |
 
     if (!arg) {
-        stackpos[0] = 1;
+        stackpos[0] = SIGN_BIT(fs);
         return 1<<8;
     }
     if (!(arg->next_arg)) {
         argtype = arg->oper(arg, stackpos);
         for (int i=0; i < (argtype>>8); i++) {
-            if (stackpos[i]) stackpos[i] = 1;
+            if (stackpos[i]) stackpos[i] = SIGN_BIT(fs);
             else stackpos[i] = NAN;
         }
         return argtype;
