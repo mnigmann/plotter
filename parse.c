@@ -9,18 +9,18 @@
 #include <math.h>
 #include <time.h>
 
-#define N_FUNCTIONS 27
+#define N_FUNCTIONS 28
 const char *function_names[N_FUNCTIONS] = {
     "arctan",       "cos",          "sin",          "mod",          "floor",        "polygon",      "total",        "distance",
     "rgb",          "max",          "abs",          "sort",         "join",         "length",       "solve",        "eigvals",
     "unique",       "onkeypress",   "color",        "round",        "rref",         "sign",         "ln",           "exp",
-    "arcsin",       "det",          "tan"
+    "arcsin",       "det",          "tan",          "min"
 };
 uint32_t (*function_pointers[N_FUNCTIONS])(void*, double*) = {
     func_arctan,    func_cosine,    func_sine,      func_mod,       func_floor,     func_polygon,   func_total,     func_distance,
     func_rgb,       func_max,       func_abs,       func_sort,      func_join,      func_length,    func_solve,     func_eigvals,
     func_unique,    func_onkeypress,func_color,     func_round,     func_rref,      func_sign,      func_log,       func_exp,
-    func_arcsin,    func_det,       func_tangent
+    func_arcsin,    func_det,       func_tangent,   func_min
 };
 
 int extract_braces(char* latex, int start) {
@@ -672,7 +672,7 @@ int parse_latex_rec(char *latex, int end, function *function_list, double *stack
             n_leftright--;
             i += 5;
         } else if ((strncmp(latex+i, "\\to", 3) == 0) && (n_leftright == 0) && (n_braces == 0)) {
-            function_list[*func_pos] = new_function(func_assign, NULL, function_list+1);
+            function_list[*func_pos] = new_function(func_assign, NULL, function_list + *func_pos + 1);
             (*func_pos)++;
             last_pos = *func_pos;
             PARSE_LATEX_REC(latex, i);
@@ -767,14 +767,14 @@ int parse_latex_rec(char *latex, int end, function *function_list, double *stack
             function_list[last_pos] = new_function(func_index, function_list[last_pos+1].next_arg, function_list+last_pos+1);
             function_list[last_pos+1].next_arg = function_list+*func_pos;
             // Parse the index
-            last_pos = *func_pos;
+            int before_index = *func_pos;
             PARSE_LATEX_REC(latex+i+6, idx_end - i - 12);
             if (flags & PARSE_COMMA) {
                 // The index is a comma-separated list of terms. We need to add in a list block
                 // This is done by shifting the index chain down
-                shift_blocks(function_list, last_pos, *func_pos-last_pos);
+                shift_blocks(function_list, before_index, *func_pos-before_index);
                 (*func_pos)++;
-                function_list[last_pos] = new_function(func_list, NULL, function_list+last_pos+1);
+                function_list[before_index] = new_function(func_list, NULL, function_list+before_index+1);
             }
             i = idx_end;
         }
@@ -1307,7 +1307,7 @@ int parse_latex_rec(char *latex, int end, function *function_list, double *stack
                     // If the variable is not found, we may have to create one. The variable will remain
                     // in-scope until parsing is done. The PARSE_NEWVAR flag is set
                     if ((*var_size > 0) && (variable_list[*var_size-1].flags & VARIABLE_IN_SCOPE) && (variable_list[*var_size-1].flags & VARIABLE_XYLIKE)){
-                        printf("ERROR: variable %.*s not found!\n", subscript-start+1, latex+start);
+                        printf("ERROR: variable %.*s not found! (%s %p)\n", subscript-start+1, latex+start, variable_list[*var_size-1].name, variable_list+(*var_size-1));
                         exit(EXIT_FAILURE);
                     }
                     printf("Creating variable %.*s\n", subscript-start+1, latex+start);
@@ -1803,6 +1803,8 @@ expression *parse_file(file_data *fd, char *stringbuf) {
                 func_pos++;
             }
             has_xy = 0;
+            // Remove local variables from scope
+            for (int v=varpos - variable_list; v < var_size; v++) variable_list[v].flags &= ~VARIABLE_IN_SCOPE;
             for (int p=last_pos; p < func_pos; p++) {
                 if (function_list[p].oper == func_assign) {
                     exprpos->flags |= EXPRESSION_ACTION;
@@ -1811,6 +1813,7 @@ expression *parse_file(file_data *fd, char *stringbuf) {
                 if (function_list[p].oper == func_value) {
                     // If the variable was created during parsing and is x-like, replace with x
                     tempvar = ((variable*)(function_list[p].value));
+                    if (function_list[p].value_type & 0x40) printf("references variable %s (%02x)\n", tempvar->name, tempvar->flags);
                     if ((tempvar >= varpos) && (tempvar->flags & VARIABLE_XLIKE)) {
                         tempvar->flags &= ~VARIABLE_IN_SCOPE;
                         function_list[p].value = (void*)(variable_list);
