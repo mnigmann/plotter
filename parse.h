@@ -29,6 +29,30 @@
 #define CACHE_ENABLE 0x80000000
 #define CACHE_SIZE_MASK 0x7fffffff
 
+#define ERR_UNCLOSED_PAREN          0x0100
+#define ERR_UNCLOSED_BRACKET        0x0200
+#define ERR_UNCLOSED_BRACE          0x0300
+#define ERR_UNCLOSED_ABS            0x0400
+#define ERR_MISSING_EQUALS          0x0500
+
+#define ERR_PARSE_PARENTHETICAL     0x0001
+#define ERR_PARSE_LIST              0x0002
+#define ERR_PARSE_CONDITIONAL       0x0003
+#define ERR_PARSE_INDEX             0x0004
+#define ERR_PARSE_SUBSCRIPT         0x0005
+#define ERR_PARSE_SUPERSCRIPT       0x0006
+#define ERR_PARSE_FRACTION          0x0007
+#define ERR_PARSE_SUM_BEGIN         0x0008
+#define ERR_PARSE_SUM_END           0x0009
+#define ERR_PARSE_INTEGRAL_LB       0x000a
+#define ERR_PARSE_INTEGRAL_UB       0x000b
+#define ERR_PARSE_FUNC_ARG          0x000c
+#define ERR_PARSE_OFUNC             0x000d
+#define ERR_PARSE_OFUNC_ARG         0x000e
+#define ERR_PARSE_UFUNC_ARG         0x000f
+#define ERR_PARSE_ABS               0x0010
+#define ERR_PARSE_FOR               0x0011
+
 /*
  * Data structures used for this program
  *  * Function list that stores function blocks
@@ -121,7 +145,7 @@ void print_object(uint32_t type, double *pos);
 
 void load_file(char *fname, file_data *fd);
 void evaluate_from(file_data *fd, expression *top_expr);
-int parse_latex_rec(char *latex, int end, function *function_list, double *stack, variable *variable_list, char *stringbuf, int *func_pos, int *stack_size, int *var_size, int *string_size, uint8_t *flags);
+uint32_t parse_latex_rec(char *latex, int end, function *function_list, double *stack, variable *variable_list, char *stringbuf, int *func_pos, int *stack_size, int *var_size, int *string_size, uint8_t *flags);
 void parse_latex(char *latex, function *function_list, double *stack, variable *variable_list, char *stringbuf, int *stack_size, int *var_size, int *string_size);
 expression* parse_file(file_data *fd, char *stringbuf);
 

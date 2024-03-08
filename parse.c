@@ -66,6 +66,22 @@ int extract_parenthetical(char *latex, int start) {
     return -1;
 }
 
+int extract_abs(char *latex, int start) {
+    int end = strlen(latex);
+    int parentheses = 0;
+    for (int i=start; i+6 < end; i++) {
+        if (strncmp(latex+i, "\\left|", 6) == 0) {
+            parentheses++;
+            i += 5;
+        } else if (strncmp(latex+i, "\\right|", 7) == 0) {
+            parentheses--;
+            i += 6;
+        }
+        if (parentheses == 0) return i;
+    }
+    return -1;
+}
+
 int extract_double(char *latex, int start, double *result) {
     int end = strlen(latex);
     uint8_t is_constant = 1;
@@ -521,10 +537,12 @@ uint32_t (*extract_function_call(char *cmd_start, uint32_t cmd_len))(void*, doub
     return NULL;
 }
 
-#define PARSE_LATEX_REC(_latex, _end) parse_latex_rec(_latex, _end, function_list, stack, variable_list, stringbuf, func_pos, stack_size, var_size, string_size, &flags)
+#define PARSE_LATEX_REC(_latex, _end) if ((status = parse_latex_rec(_latex, _end, function_list, stack, variable_list, stringbuf, func_pos, stack_size, var_size, string_size, &flags))) return status
+#define ERR_NEG(val, ret) if ((val) < 0) return ret;
 
-int parse_latex_rec(char *latex, int end, function *function_list, double *stack, variable *variable_list, char *stringbuf, int *func_pos, int *stack_size, int *var_size, int *string_size, uint8_t *result_flags) {
+uint32_t parse_latex_rec(char *latex, int end, function *function_list, double *stack, variable *variable_list, char *stringbuf, int *func_pos, int *stack_size, int *var_size, int *string_size, uint8_t *result_flags) {
     printf("Parsing %.*s\n", end, latex);
+    uint32_t status;
     
     if (end == 0) return 0;
 
@@ -757,7 +775,7 @@ int parse_latex_rec(char *latex, int end, function *function_list, double *stack
         // the term code down one function block and inserting the index block above it.
         if ((*func_pos > init_pos) && (i+5 < end) && (strncmp(latex+i, "\\left[", 6) == 0) && ((i < 5) || !(strncmp(latex+i-5, "\\cdot", 5) == 0))) {
             // Variable has an index
-            idx_end = extract_brackets(latex, i);
+            ERR_NEG(idx_end = extract_brackets(latex, i), ERR_UNCLOSED_BRACKET | ERR_PARSE_INDEX);
             printf("Index found at position %d - %d, func_pos %d, last_pos %d\n", i, idx_end, *func_pos, last_pos);
             flags = 0;
             // Move the previous term down one block
@@ -780,7 +798,7 @@ int parse_latex_rec(char *latex, int end, function *function_list, double *stack
         }
         // Check if the previous term has a superscript
         else if ((*func_pos > init_pos) && (latex[i] == '^')) {
-            superscript = extract_braces(latex, i+1);
+            ERR_NEG(superscript = extract_braces(latex, i+1), ERR_UNCLOSED_BRACE | ERR_PARSE_SUPERSCRIPT);
             printf("superscript found %.*s\n", superscript-i-2, latex+i+2);
             shift_blocks(function_list, last_pos, *func_pos-last_pos);
             (*func_pos)++;
@@ -821,104 +839,27 @@ int parse_latex_rec(char *latex, int end, function *function_list, double *stack
             arg1_end = 0; arg2_end = 0;
             printf("Found command %.*s, %d\n", cmd_len, latex+cmd_start, cmd_len);
             if ((cmd_len == 4) && (strncmp(latex+cmd_start, "frac", cmd_len) == 0)) {
-                arg1_end = extract_braces(latex, cmd_end);
-                arg2_end = extract_braces(latex, arg1_end+1);
+                ERR_NEG(arg1_end = extract_braces(latex, cmd_end), ERR_UNCLOSED_BRACE | ERR_PARSE_FRACTION);
+                ERR_NEG(arg2_end = extract_braces(latex, arg1_end+1), ERR_UNCLOSED_BRACE | ERR_PARSE_FRACTION);
                 arg1_start = cmd_end + 1;
                 arg2_start = arg1_end + 2;
                 printf("Found fraction: %d-%d over %d-%d\n", arg1_start, arg1_end, arg2_start, arg2_end);
                 i = arg2_end;
                 oper = func_div;
             } else if ((oper = extract_function_call(latex+cmd_start, cmd_len)) != NULL) {
-                arg1_end = extract_parenthetical(latex, cmd_end);
+                ERR_NEG(arg1_end = extract_parenthetical(latex, cmd_end), ERR_UNCLOSED_PAREN | ERR_PARSE_FUNC_ARG);
                 printf("general function %.*s\n", arg1_end - cmd_end - 12, latex+cmd_end+6);
                 i = arg1_end;
                 arg1_end -= 6;
                 arg1_start = cmd_end+6;
-            } /*else if ((cmd_len == 6) && (strncmp(latex+cmd_start, "arctan", cmd_len)==0)) {
-                arg1_end = extract_parenthetical(latex, cmd_end);
-                printf("multiply arctangent %.*s\n", arg1_end - cmd_end - 12, latex+cmd_end+6);
-                i = arg1_end;
-                arg1_end -= 6;
-                arg1_start = cmd_end+6;
-                oper = func_arctan;
-            } else if ((cmd_len == 6) && (strncmp(latex+cmd_start, "arcsin", cmd_len)==0)) {
-                arg1_end = extract_parenthetical(latex, cmd_end);
-                printf("multiply arcsine %.*s\n", arg1_end - cmd_end - 12, latex+cmd_end+6);
-                i = arg1_end;
-                arg1_end -= 6;
-                arg1_start = cmd_end+6;
-                oper = func_arcsin;
-            } else if ((cmd_len == 2) && (strncmp(latex+cmd_start, "ln", cmd_len)==0)) {
-                arg1_end = extract_parenthetical(latex, cmd_end);
-                printf("multiply ln %.*s\n", arg1_end - cmd_end - 12, latex+cmd_end+6);
-                i = arg1_end;
-                arg1_end -= 6;
-                arg1_start = cmd_end + 6;
-                oper = func_log;
-            } else if ((cmd_len == 3) && (strncmp(latex+cmd_start, "exp", cmd_len)==0)) {
-                arg1_end = extract_parenthetical(latex, cmd_end);
-                printf("multiply exp %.*s\n", arg1_end - cmd_end - 12, latex+cmd_end+6);
-                i = arg1_end;
-                arg1_end -= 6;
-                arg1_start = cmd_end + 6;
-                oper = func_exp;
-            } else if ((cmd_len == 3) && (strncmp(latex+cmd_start, "cos", cmd_len)==0)) {
-                arg1_end = extract_parenthetical(latex, cmd_end);
-                printf("multiply cosine %.*s\n", arg1_end - cmd_end - 12, latex+cmd_end+6);
-                i = arg1_end;
-                arg1_end -= 6;
-                arg1_start = cmd_end + 6;
-                oper = func_cosine;
-            } else if ((cmd_len == 3) && (strncmp(latex+cmd_start, "sin", cmd_len)==0)) {
-                arg1_end = extract_parenthetical(latex, cmd_end);
-                printf("multiply sine %.*s\n", arg1_end - cmd_end - 12, latex+cmd_end+6);
-                i = arg1_end;
-                arg1_end -= 6;
-                arg1_start = cmd_end + 6;
-                oper = func_sine;
-            } else if ((cmd_len == 3) && (strncmp(latex+cmd_start, "tan", cmd_len)==0)) {
-                arg1_end = extract_parenthetical(latex, cmd_end);
-                printf("multiply tangent %.*s\n", arg1_end - cmd_end - 12, latex+cmd_end+6);
-                i = arg1_end;
-                arg1_end -= 6;
-                arg1_start = cmd_end + 6;
-                oper = func_tangent;
-            } else if ((cmd_len == 3) && (strncmp(latex+cmd_start, "det", cmd_len)==0)) {
-                arg1_end = extract_parenthetical(latex, cmd_end);
-                printf("multiply det %.*s\n", arg1_end - cmd_end - 12, latex+cmd_end+6);
-                i = arg1_end;
-                arg1_end -= 6;
-                arg1_start = cmd_end + 6;
-                oper = func_det;
-            } else if ((cmd_len == 3) && (strncmp(latex+cmd_start, "abs", cmd_len)==0)) {
-                arg1_end = extract_parenthetical(latex, cmd_end);
-                printf("multiply abs %.*s\n", arg1_end - cmd_end - 12, latex+cmd_end+6);
-                i = arg1_end;
-                arg1_end -= 6;
-                arg1_start = cmd_end + 6;
-                oper = func_abs;
-            } else if ((cmd_len == 3) && (strncmp(latex+cmd_start, "max", cmd_len)==0)) {
-                arg1_end = extract_parenthetical(latex, cmd_end);
-                printf("multiply max %.*s\n", arg1_end - cmd_end - 12, latex+cmd_end+6);
-                i = arg1_end;
-                arg1_end -= 6;
-                arg1_start = cmd_end + 6;
-                oper = func_max;
-            } else if ((cmd_len == 3) && (strncmp(latex+cmd_start, "min", cmd_len)==0)) {
-                arg1_end = extract_parenthetical(latex, cmd_end);
-                printf("multiply min %.*s\n", arg1_end - cmd_end - 12, latex+cmd_end+6);
-                i = arg1_end;
-                arg1_end -= 6;
-                arg1_start = cmd_end + 6;
-                oper = func_min;
-            }*/ else if (((strncmp(latex+cmd_start, "sum", cmd_len) == 0) && (cmd_len == 3)) || ((strncmp(latex+cmd_start, "prod", cmd_len) == 0) && (cmd_len == 4))) {
+            } else if (((strncmp(latex+cmd_start, "sum", cmd_len) == 0) && (cmd_len == 3)) || ((strncmp(latex+cmd_start, "prod", cmd_len) == 0) && (cmd_len == 4))) {
                 // Sums have three parts: a definition, an end point, and an expression to be summed
                 // We assume that the entire remaining expression is the sum
                 i = cmd_end;
-                subscript = extract_braces(latex, i+1);
-                superscript = extract_braces(latex, subscript+2);
+                ERR_NEG(subscript = extract_braces(latex, i+1), ERR_UNCLOSED_BRACE | ERR_PARSE_SUM_BEGIN);
+                ERR_NEG(superscript = extract_braces(latex, subscript+2), 1 | ERR_PARSE_SUM_END);
                 printf("Sum found, %d, %d\n", subscript, superscript);
-                arg1_end = get_next_match(latex, i+2, subscript, '=');
+                ERR_NEG(arg1_end = get_next_match(latex, i+2, subscript, '='), ERR_MISSING_EQUALS | ERR_PARSE_SUM_BEGIN);
                 printf("Variable is %.*s\n", arg1_end-i-2, latex+i+2);
                 printf("Initial value is %.*s\n", subscript-arg1_end-1, latex+arg1_end+1);
                 printf("Final value is %.*s\n", superscript-subscript-3, latex+subscript+3);
@@ -957,8 +898,8 @@ int parse_latex_rec(char *latex, int end, function *function_list, double *stack
                 //   4. func_value, points to the lower bound
                 //   5. ... (expression)
                 i = cmd_end;
-                subscript = extract_braces(latex, i+1);
-                superscript = extract_braces(latex, subscript+2);
+                ERR_NEG(subscript = extract_braces(latex, i+1), ERR_UNCLOSED_BRACE | ERR_PARSE_INTEGRAL_LB);
+                ERR_NEG(superscript = extract_braces(latex, subscript+2), ERR_UNCLOSED_BRACE | ERR_PARSE_INTEGRAL_UB);
                 arg1_start = end-2;
                 if (latex[end-1] == '}') {
                     for (int j=end-1; j > superscript; j--) {
@@ -1004,7 +945,7 @@ int parse_latex_rec(char *latex, int end, function *function_list, double *stack
                 printf("parsing %.*s done, func_pos %d\n", end, latex, *func_pos);
                 return 0;
             } else if ((cmd_len == 12) && (strncmp(latex+cmd_start, "operatorname", cmd_len) == 0)) {
-                arg1_end = extract_braces(latex, cmd_start+12);
+                ERR_NEG(arg1_end = extract_braces(latex, cmd_start+12), ERR_UNCLOSED_BRACE | ERR_PARSE_OFUNC);
                 oper = NULL;
                 for (int j=0; j < N_FUNCTIONS; j++) {
                     if ((arg1_end-cmd_start-13 == strlen(function_names[j])) && (strncmp(function_names[j], latex+cmd_start+13, arg1_end-cmd_start-13) == 0)) {
@@ -1018,13 +959,13 @@ int parse_latex_rec(char *latex, int end, function *function_list, double *stack
                 }
                 i = arg1_end+1;
                 arg1_start = i+6;
-                arg1_end = extract_parenthetical(latex, i);
+                ERR_NEG(arg1_end = extract_parenthetical(latex, i), ERR_UNCLOSED_PAREN | ERR_PARSE_FUNC_ARG);
                 i = arg1_end;
                 arg1_end -= 6;
             } else if (((i == 0) || ((i >= 5) && (strncmp(latex+i-5, "\\cdot", 5) == 0))) && (cmd_len == 4) && (strncmp(latex+cmd_start, "left[", cmd_len+1) == 0)) {
                 // Brackets can only be interpreted as a list if they are the first thing in the expression
                 // or if they follow a \cdot.
-                arg1_end = extract_brackets(latex, i);
+                ERR_NEG(arg1_end = extract_brackets(latex, i), ERR_UNCLOSED_BRACKET | ERR_PARSE_LIST);
                 n_terms = 0;
                 for (int j=i+6; j < end; j++) {
                     if (latex[j] == '{') n_braces++;
@@ -1051,7 +992,7 @@ int parse_latex_rec(char *latex, int end, function *function_list, double *stack
                         start = j;
                         j += 18;
                         while (1>0) {
-                            subscript = get_next_match(latex, j, arg1_end+1, '=');
+                            ERR_NEG(subscript = get_next_match(latex, j, arg1_end+1, '='), ERR_MISSING_EQUALS | ERR_PARSE_FOR);
                             printf("for expression has variable %.*s", subscript-j, latex+j);
                             // Insert the variable into the variable table. pointer will point to the beginning
                             // of the definition of that variable in latex. type will contain the length of
@@ -1107,7 +1048,7 @@ int parse_latex_rec(char *latex, int end, function *function_list, double *stack
                     oper = func_list;
                 }
             } else if ((cmd_len == 4) && (strncmp(latex+cmd_start, "left(", cmd_len+1) == 0)) {
-                arg1_end = extract_parenthetical(latex, cmd_start-1);
+                ERR_NEG(arg1_end = extract_parenthetical(latex, cmd_start-1), ERR_UNCLOSED_PAREN | ERR_PARSE_PARENTHETICAL);
                 i = arg1_end;
                 *func_pos = insert_product_term(function_list, last_pos, *func_pos, init_pos);
                 last_pos = *func_pos;
@@ -1130,8 +1071,9 @@ int parse_latex_rec(char *latex, int end, function *function_list, double *stack
                 arg2_end = 0;
             } else if ((cmd_len == 4) && (strncmp(latex+cmd_start, "left|", cmd_len+1) == 0)) {
                 latex[i+5] = 0;
-                arg1_end = get_next_match(latex, i, end, '|')-6;
-                latex[i+5] = '|';
+                //arg1_end = get_next_match(latex, i, end, '|')-6;
+                ERR_NEG(arg1_end = extract_abs(latex, cmd_start-1), ERR_UNCLOSED_ABS | ERR_PARSE_ABS);
+                //latex[i+5] = '|';
                 printf("Found absolute value %.*s\n", arg1_end-i-6, latex+i+6);
                 *func_pos = insert_product_term(function_list, last_pos, *func_pos, init_pos);
                 last_pos = *func_pos;
@@ -1142,7 +1084,7 @@ int parse_latex_rec(char *latex, int end, function *function_list, double *stack
                 arg1_end = 0;
                 arg2_end = 0;
             } else if ((cmd_len == 4) && (strncmp(latex+cmd_start, "left\\{", cmd_len+2) == 0)) {
-                arg1_end = extract_braces(latex, cmd_start+5);
+                ERR_NEG(arg1_end = extract_braces(latex, cmd_start+5), ERR_UNCLOSED_BRACE | ERR_PARSE_CONDITIONAL);
                 printf("Found conditional from %d to %d: %.*s\n", cmd_start+6, arg1_end-7, arg1_end-cmd_start-13, latex+cmd_start+6);
                 *func_pos = insert_product_term(function_list, last_pos, *func_pos, init_pos);
                 last_pos = *func_pos;
@@ -1177,6 +1119,7 @@ int parse_latex_rec(char *latex, int end, function *function_list, double *stack
                     *result_flags |= flags;
                 }
                 // Failed to find colon, last separator is comma, ends with a default expression
+                // TODO: conditionals with only one component (a condition) either return 1 or NaN
                 if (arg2_start < 0) {
                     function_list[old_pos].next_arg = function_list + *func_pos;
                     old_pos = *func_pos;
@@ -1228,7 +1171,7 @@ int parse_latex_rec(char *latex, int end, function *function_list, double *stack
                     // We cannot assume that the function has been defined, only declared. The function
                     // definitions must be correctly connected later. For now, we connect to the variable
                     // declaration
-                    arg1_end = extract_parenthetical(latex, cmd_end);
+                    ERR_NEG(arg1_end = extract_parenthetical(latex, cmd_end), ERR_UNCLOSED_PAREN | ERR_PARSE_UFUNC_ARG);
                     printf("multiply %.*s at %d with argument %.*s\n", cmd_len+1, latex+cmd_start-1, varindex, arg1_end-cmd_end+1, latex+cmd_end);
                     *func_pos = insert_product_term(function_list, last_pos, *func_pos, init_pos);
                     function_list[*func_pos] = new_function(func_user_defined, NULL, function_list + *func_pos + 1);
@@ -1273,13 +1216,13 @@ int parse_latex_rec(char *latex, int end, function *function_list, double *stack
         else if ((('a' <= latex[i]) && (latex[i] <= 'z')) || (('A' <= latex[i]) && (latex[i] <= 'Z'))) {
             subscript = 0; superscript = 0; start = i;
             if ((i+1 < end) && (latex[i+1] == '_')) {
-                subscript = extract_braces(latex, i+2);
+                ERR_NEG(subscript = extract_braces(latex, i+2), ERR_UNCLOSED_BRACE | ERR_PARSE_SUBSCRIPT);
                 i = subscript;
             }
             // We must parse superscripts separately here because functions like sin, cos, tan, etc.
             // can be exponentiated directly
             if ((i+1 < end) && (latex[i+1] == '^')) {
-                superscript = extract_braces(latex, i+2);
+                ERR_NEG(superscript = extract_braces(latex, i+2), ERR_UNCLOSED_BRACE | ERR_PARSE_SUPERSCRIPT);
                 i = superscript;
             }
             if (subscript == 0) subscript = start;
@@ -1322,7 +1265,7 @@ int parse_latex_rec(char *latex, int end, function *function_list, double *stack
                     // We cannot assume that the function has been defined, only declared. The function
                     // definitions must be correctly connected later. For now, we connect to the variable
                     // declaration
-                    arg1_end = extract_parenthetical(latex, subscript+1);
+                    ERR_NEG(arg1_end = extract_parenthetical(latex, subscript+1), ERR_UNCLOSED_PAREN | ERR_PARSE_UFUNC_ARG);
                     printf("multiply %.*s at %d with argument %.*s\n", subscript-start+1, latex+start, varindex, arg1_end-subscript, latex+subscript+1);
                     *func_pos = insert_product_term(function_list, last_pos, *func_pos, init_pos);
                     function_list[*func_pos] = new_function(func_user_defined, NULL, function_list + *func_pos + 1);
@@ -1791,7 +1734,8 @@ expression *parse_file(file_data *fd, char *stringbuf) {
             int var_size = varpos - variable_list;
             int string_size = stringpos - stringbuf;
             last_pos = func_pos;
-            parse_latex_rec(line+i, read-i, function_list, stack, variable_list, stringbuf, &func_pos, &stack_size, &var_size, &string_size, &flags);
+            uint32_t err = parse_latex_rec(line+i, read-i, function_list, stack, variable_list, stringbuf, &func_pos, &stack_size, &var_size, &string_size, &flags);
+            if (err) fprintf(stderr, "\x1b[31mError code %08x while parsing\x1b[0m\n", err);
             printf("after parsing, func_pos: %d, string_size: %d, stack_size: %d, var_size: %d, last_pos: %d\n", func_pos, string_size, stack_size, var_size, last_pos);
             if ((exprpos->var) && (strcmp(exprpos->var->name, "r") == 0)) {
                 printf("Polar expression found\n");
@@ -1864,7 +1808,7 @@ expression *parse_file(file_data *fd, char *stringbuf) {
                     break;
                 }
             }
-            if (no_variables) {
+            if ((no_variables) && (func_pos > last_pos)) {
                 printf("Expression %p has no variables, evaluating and storing to %d\n", exprpos, last_pos);
                 uint32_t argtype = function_list[last_pos].oper(function_list+last_pos, stack+stack_size);
                 double *temp = malloc((argtype>>8)*sizeof(double));
