@@ -1118,17 +1118,21 @@ uint32_t parse_latex_rec(char *latex, int end, function *function_list, double *
                     }
                     *result_flags |= flags;
                 }
-                // Failed to find colon, last separator is comma, ends with a default expression
                 // TODO: conditionals with only one component (a condition) either return 1 or NaN
-                if (arg2_start < 0) {
+                if (function_list[last_pos+1].oper == NULL) {
+                    // Empty conditional
+                    old_pos = *func_pos;
+                    PARSE_LATEX_REC(latex+i+1, arg1_end-i-8);
+                    if (*func_pos == old_pos) function_list[last_pos].first_arg = NULL;
+                } else if (arg2_start < 0) {
+                    // Failed to find colon, last separator is comma, ends with a default expression
                     function_list[old_pos].next_arg = function_list + *func_pos;
                     old_pos = *func_pos;
                     flags = 0;
                     PARSE_LATEX_REC(latex+i+1, arg1_end-i-8);
                     *result_flags |= flags;
-                } 
+                } else {
                 // Failed to find comma, last separator is colon, ends with no default expression
-                else {
                     function_list[old_pos].next_arg = function_list + *func_pos;
                     old_pos = *func_pos;
                     PARSE_LATEX_REC(latex+arg2_start+1, arg1_end-arg2_start-8);
@@ -1811,6 +1815,8 @@ expression *parse_file(file_data *fd, char *stringbuf) {
             if ((no_variables) && (func_pos > last_pos)) {
                 printf("Expression %p has no variables, evaluating and storing to %d\n", exprpos, last_pos);
                 uint32_t argtype = function_list[last_pos].oper(function_list+last_pos, stack+stack_size);
+                printf("    result "); print_object(argtype, stack+stack_size);
+                printf(" stored to %p, has type %08x\n", stack+stack_size, argtype);
                 double *temp = malloc((argtype>>8)*sizeof(double));
                 memcpy(temp, stack+stack_size, (argtype>>8)*sizeof(double));
                 function_list[last_pos] = new_value(temp, argtype, NULL);

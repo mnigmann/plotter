@@ -1322,6 +1322,19 @@ uint32_t func_conditional(void *f, double *stackpos) {
     // | ~mask | result_3 |
     // | result_3 |
 
+    if (!arg) {
+        stackpos[0] = 1;
+        return 1<<8;
+    }
+    if (!(arg->next_arg)) {
+        argtype = arg->oper(arg, stackpos);
+        for (int i=0; i < (argtype>>8); i++) {
+            if (stackpos[i]) stackpos[i] = 1;
+            else stackpos[i] = NAN;
+        }
+        return argtype;
+    }
+
     while (arg) {
         skipped = 0;
         if ((argtype == ((1<<8)|TYPE_BOOLEAN)) && (last_mask_ptr[0] == 0) && (arg->oper == func_assign)) {
