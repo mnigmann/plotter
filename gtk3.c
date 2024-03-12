@@ -499,6 +499,10 @@ void draw_function_constant_ds(expression *expr, file_data *fd, uint8_t *color, 
     if (expr->special_points) free(expr->special_points);
     expr->special_points = NULL;
     expr->n_special_points = 0;
+    int func_pos = fd->n_func;
+    evaluate_branch(fd->function_list, expr->func, &func_pos, &stackpos, 1, NULL, 0);
+    fd->n_stack = stackpos - fd->stack;
+    printf("evaluate_branch added %d function blocks\n", func_pos - fd->n_func);
     for (uint32_t i=0; i < n; i++) {
         flags = 0;
         eval_index = i;
@@ -519,6 +523,14 @@ void draw_function_constant_ds(expression *expr, file_data *fd, uint8_t *color, 
     }
     for (int i=0; i < expr->n_special_points; i++) {
         printf("Special point at %f: (%f, %f)\n", expr->special_points[3*i], expr->special_points[3*i+1], expr->special_points[3*i+2]);
+    }
+    function *tempfunc;
+    for (int i=0; i < fd->n_func; i++) {
+        tempfunc = fd->function_list + i;
+        if ((tempfunc->oper == func_value) && (tempfunc->first_arg >= fd->function_list + fd->n_func) && (tempfunc->first_arg < fd->function_list + func_pos)) {
+            tempfunc = tempfunc->first_arg;
+            memcpy(fd->function_list + i, tempfunc, sizeof(function));
+        }
     }
 }
 
@@ -1473,8 +1485,8 @@ int main (int argc, char **argv) {
     memset(variable_list, 0, 10*sizeof(variable));
     memset(expression_list, 0, 10*sizeof(expression));
     printf("First stack positions %p, %p\n", stack, stack+1);
-    variable_list[0] = new_variable("x", 0, VARIABLE_IN_SCOPE | VARIABLE_INTERVAL, NULL);
-    variable_list[1] = new_variable("y", 0, VARIABLE_IN_SCOPE | VARIABLE_INTERVAL, NULL);
+    variable_list[0] = new_variable("x", 0, VARIABLE_IN_SCOPE | VARIABLE_INTERVAL | VARIABLE_NOT_FIXED, NULL);
+    variable_list[1] = new_variable("y", 0, VARIABLE_IN_SCOPE | VARIABLE_INTERVAL | VARIABLE_NOT_FIXED, NULL);
     double pi = M_PI;
     variable_list[2] = new_variable("\\pi", 1<<8, VARIABLE_IN_SCOPE, &pi);
     variable_list[3] = new_variable("\\theta", 0, VARIABLE_IN_SCOPE, NULL);

@@ -132,7 +132,7 @@ function new_value(void *value, uint32_t value_type, function *next_arg) {
     return block;
 }
 
-variable new_variable(char *name, int type, uint8_t flags, double *pointer) {
+variable new_variable(char *name, int type, uint16_t flags, double *pointer) {
     variable var;
     var.name = name;
     var.type = type;
@@ -1070,19 +1070,12 @@ uint32_t parse_latex_rec(char *latex, int end, function *function_list, double *
                 arg1_end = 0;
                 arg2_end = 0;
             } else if ((cmd_len == 4) && (strncmp(latex+cmd_start, "left|", cmd_len+1) == 0)) {
-                latex[i+5] = 0;
-                //arg1_end = get_next_match(latex, i, end, '|')-6;
                 ERR_NEG(arg1_end = extract_abs(latex, cmd_start-1), ERR_UNCLOSED_ABS | ERR_PARSE_ABS);
-                //latex[i+5] = '|';
-                printf("Found absolute value %.*s\n", arg1_end-i-6, latex+i+6);
-                *func_pos = insert_product_term(function_list, last_pos, *func_pos, init_pos);
-                last_pos = *func_pos;
-                function_list[*func_pos] = new_function(func_abs, NULL, function_list + *func_pos + 1);
-                (*func_pos)++;
-                PARSE_LATEX_REC(latex+i+6, arg1_end-i-6);
-                i = arg1_end+6;
-                arg1_end = 0;
-                arg2_end = 0;
+                printf("Found absolute value %.*s\n", arg1_end - cmd_end - 7, latex+cmd_end+1);
+                i = arg1_end;
+                arg1_end -= 6;
+                arg1_start = cmd_end+1;
+                oper = func_abs;
             } else if ((cmd_len == 4) && (strncmp(latex+cmd_start, "left\\{", cmd_len+2) == 0)) {
                 ERR_NEG(arg1_end = extract_braces(latex, cmd_start+5), ERR_UNCLOSED_BRACE | ERR_PARSE_CONDITIONAL);
                 printf("Found conditional from %d to %d: %.*s\n", cmd_start+6, arg1_end-7, arg1_end-cmd_start-13, latex+cmd_start+6);
@@ -1450,6 +1443,102 @@ uint8_t check_fixed(variable *variable_list, function *func) {
         arg = arg->next_arg;
     }
     return result;
+}
+
+
+/*
+ * \sum_{m=1}^{6}\left(m^{2}\sum_{n=1}^{6}m^{n}\right)
+ * If a particular branch contains undefined local variables, then it cannot be evaluated
+ * since this will cause an error. Thus, we must make a list of all local variables encountered,
+ * and only evaluate when all of them have been defined
+ * 
+ * Return modes:
+ * E (0x0): depends on variable and local variable
+ * V (0x1): variable
+ * L (0x3): fixed, constant, or depends on local variable
+ * F (0x7): fixed or constant
+ *
+ */
+uint8_t evaluate_branch(function *function_list, function *func, int *func_pos, double **stackpos, uint8_t include_fixed, variable *local, int n_local) {
+    function *arg = func->first_arg;
+    if (arg == NULL) {
+        if (func->value_type & 0x40) {
+            variable *var = ((variable*)(func->value));
+            if (include_fixed) {
+                if ((local) && (local <= var) && (var < (local+n_local))) {
+                    // Variable is a local variable
+                    //printf("found local variable %s (%p)\n", var->name, var);
+                    return 0x3;
+                } else if (var->flags & VARIABLE_NOT_FIXED) {
+                    // Variable depends on x or y
+                    //printf("found variable %s (%p)\n", var->name, var);
+                    return 0x1;
+                } else {
+                    // Variable is fixed
+                    //printf("found fixed variable %s (%p)\n", var->name, var);
+                    return 0x7;
+                }
+            }
+            // Assume the variable can change
+            else return 0x1;
+        }
+        // The value is a constant
+        else return 0x7;
+    }
+    uint8_t fixed = 0x7, f;
+    while (arg) {
+        if ((arg->oper == func_sum) || (arg->oper == func_prod)) {
+            variable *idx = (variable*)(arg->first_arg->value);
+            idx->flags |= VARIABLE_NOT_FIXED;
+            f = evaluate_branch(function_list, arg, func_pos, stackpos, include_fixed, idx, 1);
+            //printf("sum found over %s, return code %d\n", idx->name, f);
+            // If a sum or product returns E, then at some point, we encountered a
+            // variable that depends on x or y. Alternatively, we could have encountered
+            // a local variable from higher up in the tree. Thus, this could lead to
+            // issues when we have nested sums. 
+            // TODO: return L when there is no x/y dependency
+            if (!f) f = 0x1;
+            if (f == 0x3) f = 0x7;
+            idx->flags &= ~VARIABLE_NOT_FIXED;
+        } else {
+            f = evaluate_branch(function_list, arg, func_pos, stackpos, include_fixed, local, n_local);
+        }
+        // If one of the arguments returns E, then the whole thing must return E
+        if (!f) return 0;
+        if ((f == 0x7) && (arg->oper != func_value)) arg->value_type |= 0x20;
+        fixed &= f;
+        arg = arg->next_arg;
+    }
+    uint32_t argtype;
+    if (fixed == 0x1) {
+        arg = func->first_arg;
+        while (arg) {
+            if (arg->value_type & 0x20) {
+                if (include_fixed) {
+                    //printf("evaluating branch starting at %p, copying to %p\n", arg, function_list + *func_pos);
+                    argtype = arg->oper(arg, *stackpos);
+                    memcpy(function_list + *func_pos, arg, sizeof(function));
+                    arg->oper = func_value;
+                    arg->inter = oper_lookup(func_value)->inter;
+                    arg->first_arg = function_list + *func_pos;
+                    arg->value = *stackpos;
+                    arg->value_type = argtype;
+                    *stackpos = *stackpos + (argtype>>8);
+                    *func_pos = *func_pos + 1;
+                } else {
+                    argtype = arg->oper(arg, *stackpos);
+                    arg->oper = func_value;
+                    arg->inter = oper_lookup(func_value)->inter;
+                    arg->first_arg = NULL;
+                    arg->value = *stackpos;
+                    arg->value_type = argtype;
+                    *stackpos = *stackpos + (argtype>>8);
+                }
+            }
+            arg = arg->next_arg;
+        }
+    }
+    return fixed;
 }
 
 void load_file(char *fname, file_data *fd) {
@@ -1917,6 +2006,7 @@ expression *parse_file(file_data *fd, char *stringbuf) {
             }
                 
         }
+        if ((expr->var) && (dep_xy)) expr->var->flags |= VARIABLE_NOT_FIXED;
         if (!(expr->flags & EXPRESSION_FIXED) && ((dep_xy == VARIABLE_XLIKE) || (dep_xy == VARIABLE_YLIKE))) {
             printf("Expression %p is plottable because it only has x or y\n", expr);
             expr->flags |= EXPRESSION_PLOTTABLE;
@@ -1942,7 +2032,7 @@ expression *parse_file(file_data *fd, char *stringbuf) {
     }
 
     for (i=0; variable_list+i < varpos; i++)
-        printf("%s variable pointer at %p, points to %p, type %08X, flags %02X, new_pointer %p\n", variable_list[i].name, variable_list+i, variable_list[i].pointer, variable_list[i].type, variable_list[i].flags, variable_list[i].new_pointer);
+        printf("%s variable pointer at %p, points to %p, type %08X, flags %03X, new_pointer %p\n", variable_list[i].name, variable_list+i, variable_list[i].pointer, variable_list[i].type, variable_list[i].flags, variable_list[i].new_pointer);
     
     printf("%ld variables, %d expressions\n", (varpos-variable_list), n_expr);
 
@@ -1959,6 +2049,13 @@ expression *parse_file(file_data *fd, char *stringbuf) {
 
     *n_func = func_pos;
     *n_var = varpos - variable_list;
+
+    // Evaluate any components of expressions that do not depend on variables
+    double *stackptr = stack + stack_size;
+    for (i=0; i < n_expr; i++) {
+        evaluate_branch(function_list, expression_list[i].func, &func_pos, &stackptr, 0, NULL, 0);
+    }
+    fd->n_stack = stackptr - stack;
 
     return top_expr;
 }

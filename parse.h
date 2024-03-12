@@ -13,6 +13,7 @@
 #define VARIABLE_XYLIKE 0x30
 #define VARIABLE_ACTION 0x40
 #define VARIABLE_INTERVAL 0x80
+#define VARIABLE_NOT_FIXED 0x100
 
 #define EXPRESSION_PLOTTABLE 0x01
 #define EXPRESSION_FIXED 0x02
@@ -75,7 +76,7 @@ typedef struct function_s {
 
 typedef struct variable_s {
     char *name;
-    uint8_t flags;
+    uint16_t flags;
     double *pointer;
     uint32_t type;
     double *new_pointer;
@@ -140,13 +141,15 @@ double parse_double(char *string);
 
 function new_function(uint32_t (*oper)(void*, double*), function *next_arg, function *first_arg);
 function new_value(void *value, uint32_t value_type, function *next_arg);
-variable new_variable(char *name, int type, uint8_t flags, double *pointer);
+variable new_variable(char *name, int type, uint16_t flags, double *pointer);
 
 void print_object(uint32_t type, double *pos);
+void print_function_table(function *function_list, int func_pos);
 
 void load_file(char *fname, file_data *fd);
 void evaluate_from(file_data *fd, expression *top_expr);
 uint32_t parse_latex_rec(char *latex, int end, function *function_list, double *stack, variable *variable_list, char *stringbuf, int *func_pos, int *stack_size, int *var_size, int *string_size, uint8_t *flags);
+uint8_t evaluate_branch(function *function_list, function *func, int *func_pos, double **stackpos, uint8_t include_fixed, variable *local, int n_local);
 void parse_latex(char *latex, function *function_list, double *stack, variable *variable_list, char *stringbuf, int *stack_size, int *var_size, int *string_size);
 expression* parse_file(file_data *fd, char *stringbuf);
 
