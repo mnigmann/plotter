@@ -4,6 +4,7 @@
 #include <stdlib.h>
 #include <complex.h>
 #include <string.h>
+#include <time.h>
 #include <gsl/gsl_integration.h>
 #include <gsl/gsl_errno.h>
 #include "intervals.h"
@@ -84,7 +85,7 @@ uint32_t interval_general_two_args(void *f, double *hstackpos, double *lstackpos
         }
     }
     apply_sign(fs->value_type, hstackpos, lstackpos, 0, result_len);
-    return (result_len<<8) | TYPE_LIST;
+    return (result_len<<8) | (t1 & TYPE_LIST) | (t2 & TYPE_LIST);
 }
 
 uint32_t interval_value(void *f, double *hstackpos, double *lstackpos) {
@@ -605,6 +606,27 @@ void miarctan(double *hstackpos, double *lstackpos) {
     lstackpos[0] = atan(lstackpos[0]);
 }
 
+void miarctan2(double *hstackpos, double *lstackpos, double h, double l) {
+    // hstackpos, lstackpos give the y and h, l give the x
+    if ((hstackpos[0] >= 0) && (lstackpos[0] <= 0) && (h >= 0) && (l <= 0)) {
+        hstackpos[0] = M_PI;
+        lstackpos[0] = -M_PI;
+        return;
+    }
+    double a1 = atan2(hstackpos[0], h);
+    double a2 = atan2(hstackpos[0], l);
+    double a3 = atan2(lstackpos[0], h);
+    double a4 = atan2(lstackpos[0], l);
+    hstackpos[0] = a1;
+    if (a2 > hstackpos[0]) hstackpos[0] = a2;
+    if (a3 > hstackpos[0]) hstackpos[0] = a3;
+    if (a4 > hstackpos[0]) hstackpos[0] = a4;
+    lstackpos[0] = a1;
+    if (a2 < lstackpos[0]) lstackpos[0] = a2;
+    if (a3 < lstackpos[0]) lstackpos[0] = a3;
+    if (a4 < lstackpos[0]) lstackpos[0] = a4;
+}
+
 void miexp(double *hstackpos, double *lstackpos) {
     hstackpos[0] = exp(hstackpos[0]);
     lstackpos[0] = exp(lstackpos[0]);
@@ -623,7 +645,9 @@ uint32_t interval_tangent(void *f, double *hstackpos, double *lstackpos) {
 }
 
 uint32_t interval_arctan(void *f, double *hstackpos, double *lstackpos) {
-    return interval_general_one_arg(f, hstackpos, lstackpos, miarctan);
+    function *fs = (function*)f;
+    if (fs->first_arg->next_arg) return interval_general_two_args(f, hstackpos, lstackpos, miarctan2);
+    else return interval_general_one_arg(f, hstackpos, lstackpos, miarctan);
 }
 
 uint32_t interval_exp(void *f, double *hstackpos, double *lstackpos) {
@@ -804,7 +828,6 @@ uint32_t interval_integrate_gsl(void *f, double *hstackpos, double *lstackpos) {
     double ubv[2] = {lstackpos[0], hstackpos[0]};
     variable *varp = (variable*)(var->value);
     
-    gsl_integration_workspace *w = gsl_integration_workspace_alloc(1000);
     gsl_function F;
     uint8_t flags = 0x80;
     ((variable*)(var->value))->type = 1<<8;
@@ -833,12 +856,25 @@ uint32_t interval_integrate_gsl(void *f, double *hstackpos, double *lstackpos) {
         lstar = (fmin(ubv[1], lbv[1]) + fmax(ubv[0], ubv[0]))/2;
         ustar = lstar;
     }
+#ifdef INTERVAL_INTEGRATION_PRECISE
+    gsl_integration_workspace *w = gsl_integration_workspace_alloc(1000);
     lstatus = gsl_integration_qags(&F, lstar, ustar, 0, 1e-7, 1000, w, &lresult, &error);
     if (!(flags & 0x80)) {
         //printf("computing hresult separately\n");
         flags |= 0x01;
         hstatus = gsl_integration_qags(&F, lstar, ustar, 0, 1e-7, 1000, w, &hresult, &error);
     } else hresult = lresult;
+    gsl_integration_workspace_free(w);
+#else
+    varp->pointer = temp;
+    varp->flags |= VARIABLE_INTERVAL;
+    temp[0] = lstar;
+    temp[1] = ustar;
+    expr->inter(expr, hstackpos, lstackpos);
+    lresult = (ustar - lstar)*lstackpos[0];
+    hresult = (ustar - lstar)*hstackpos[0];
+    varp->flags &= ~VARIABLE_INTERVAL;
+#endif
     //printf("lresult %f, hresult %f, lstar %f, ustar %f\n", lresult, hresult, lstar, ustar);
     if (lresult > hresult) {
         temp[0] = hresult;

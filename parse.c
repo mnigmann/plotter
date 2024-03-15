@@ -1464,6 +1464,7 @@ uint8_t evaluate_branch(function *function_list, function *func, int *func_pos, 
     if (arg == NULL) {
         if (func->value_type & 0x40) {
             variable *var = ((variable*)(func->value));
+            if (strcmp(var->name, "\\pi") == 0) return 0x7;
             if (include_fixed) {
                 if ((local) && (local <= var) && (var < (local+n_local))) {
                     // Variable is a local variable
@@ -1487,7 +1488,7 @@ uint8_t evaluate_branch(function *function_list, function *func, int *func_pos, 
     }
     uint8_t fixed = 0x7, f;
     while (arg) {
-        if ((arg->oper == func_sum) || (arg->oper == func_prod)) {
+        if ((arg->oper == func_sum) || (arg->oper == func_prod) || (arg->oper == func_integrate_gsl)) {
             variable *idx = (variable*)(arg->first_arg->value);
             idx->flags |= VARIABLE_NOT_FIXED;
             f = evaluate_branch(function_list, arg, func_pos, stackpos, include_fixed, idx, 1);
