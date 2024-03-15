@@ -577,6 +577,7 @@ uint32_t parse_latex_rec(char *latex, int end, function *function_list, double *
 
     // Decompose commas
     last_term = 0;
+    last_pos = *func_pos;
     for (int i=0; i < end; i++) {
         i = get_next_match(latex, i, end, ',');
         if (n_terms && (i == -1)) i = end;
@@ -828,6 +829,13 @@ uint32_t parse_latex_rec(char *latex, int end, function *function_list, double *
             shift_blocks(function_list, last_pos, *func_pos-last_pos);
             (*func_pos)++;
             function_list[last_pos] = new_function(func_factorial, function_list[last_pos+1].next_arg, function_list+last_pos+1);
+            function_list[last_pos+1].next_arg = NULL;
+        }
+        // Check if the previous term is conjugated
+        else if ((*func_pos > init_pos) && (latex[i] == '*')) {
+            shift_blocks(function_list, last_pos, *func_pos-last_pos);
+            (*func_pos)++;
+            function_list[last_pos] = new_function(func_conjugate, function_list[last_pos+1].next_arg, function_list+last_pos+1);
             function_list[last_pos+1].next_arg = NULL;
         }
         // General command parsing
@@ -1798,7 +1806,8 @@ expression *parse_file(file_data *fd, char *stringbuf) {
             last_pos = func_pos;
             int var_size = varpos - variable_list;
             int string_size = stringpos - stringbuf;
-            parse_latex_rec(line+i, read-i, function_list, stack, variable_list, stringbuf, &func_pos, &stack_size, &var_size, &string_size, &flags);
+            uint32_t err = parse_latex_rec(line+i, read-i, function_list, stack, variable_list, stringbuf, &func_pos, &stack_size, &var_size, &string_size, &flags);
+            if (err) fprintf(stderr, "\x1b[31mError code %08x while parsing\x1b[0m\n", err);
             for (int p=last_pos; p < func_pos; p++) {
                 if (function_list[p].oper == func_assign) {
                     exprpos->flags |= EXPRESSION_ACTION;
@@ -1816,6 +1825,7 @@ expression *parse_file(file_data *fd, char *stringbuf) {
             stringpos = stringbuf + string_size;
             function_list[last_pos].value_type |= TYPE_ABSOLUTE_ADDR;
             // Connect next_arg of the first block in the definition to the variable block of the first argument.
+            printf("function def %p: exprpos->var is %p\n", function_list+last_pos, exprpos->var);
             function_list[last_pos].next_arg = (function*)((exprpos->var)+1);
             // Take the arguments out of the local scope after parsing
             first_arg = (exprpos->var)+1;

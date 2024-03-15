@@ -335,6 +335,19 @@ uint32_t func_arcsin(void *f, double *stackpos) {
     return func_general_one_arg(f, stackpos, asin);
 }
 
+uint32_t func_conjugate(void *f, double *stackpos) {
+    function *fs = (function*)f;
+    function *arg = fs->first_arg;
+
+    uint32_t type = arg->oper(arg, stackpos);
+    uint32_t len = type>>8;
+    if (IS_TYPE(type, TYPE_POINT)) {
+        for (uint32_t i=1; i < len; i+=2) stackpos[i] *= -1;
+    }
+    for (uint32_t i=0; i < len; i++) stackpos[i] *= SIGN_BIT(fs);
+    return type;
+}
+
 uint8_t add_in_place(double *acc, double *val, uint32_t *result_type, uint32_t *result_length, uint32_t type) {
     uint32_t len = type>>8;
     if ((*result_type & TYPE_MASK) != (type & TYPE_MASK)) {
@@ -1728,7 +1741,7 @@ uint32_t func_color(void *f, double *stackpos) {
     return target->oper(target, stackpos);
 }
 
-#define N_OPERATORS 51
+#define N_OPERATORS 52
 const oper_data oper_list[N_OPERATORS] = {
     {NULL, "unknown_function", NULL},
     {func_value, "func_value", interval_value},
@@ -1745,9 +1758,10 @@ const oper_data oper_list[N_OPERATORS] = {
     {func_tangent, "func_tangent", interval_tangent},
     {func_arctan, "func_arctan", interval_arctan},
     {func_arcsin, "func_arcsin", NULL},
+    {func_conjugate, "func_conjugate", interval_conjugate},
     {func_log, "func_log", NULL},
     {func_exp, "func_exp", interval_exp},
-    {func_factorial, "func_factorial", NULL},
+    {func_factorial, "func_factorial", interval_factorial},
     {func_abs, "func_abs", NULL},
     {func_add, "func_add", interval_add},
     {func_multiply, "func_multiply", interval_multiply},

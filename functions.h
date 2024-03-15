@@ -15,6 +15,7 @@
 #define TYPE_ABSOLUTE_ADDR 0x10
 
 const oper_data *oper_lookup(uint32_t (*ptr)(void*, double*));
+double mfac(double x);
 
 uint32_t func_value(void *f, double *stackpos);
 
@@ -30,6 +31,7 @@ uint32_t func_cosine(void *f, double *stackpos);
 uint32_t func_tangent(void *f, double *stackpos);
 uint32_t func_arctan(void *f, double *stackpos);
 uint32_t func_arcsin(void *f, double *stackpos);
+uint32_t func_conjugate(void *f, double *stackpos);
 uint32_t func_log(void *f, double *stackpos);
 uint32_t func_sub(void *f, double *stackpos);
 uint32_t func_exp(void *f, double *stackpos);

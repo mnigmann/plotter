@@ -41,6 +41,7 @@ double xscale;
 double yscale;
 uint16_t nfev = 0;
 uint16_t niev = 0;
+double enclosed_area = 0;
 
 function function_list[2048];
 variable variable_list[512];
@@ -560,6 +561,7 @@ void draw_implicit_rec(expression *expr, file_data *fd, cairo_t *cr, uint8_t *co
             cairo_rectangle(cr, SCALE_XK(area[0]), SCALE_YK(area[3]), xscale*(area[1] - area[0]), yscale*(area[3] - area[2]));
             cairo_fill(cr);
             SET_COLOR_OPACITY(cr, color, 1);
+            enclosed_area += (area[1] - area[0])*(area[3] - area[2]);
         }
 #endif
     }
@@ -617,6 +619,7 @@ void draw_implicit_rec(expression *expr, file_data *fd, cairo_t *cr, uint8_t *co
                 cairo_rectangle(cr, SCALE_XK(area[0]), SCALE_YK(area[3]), xscale*(area[1] - area[0]), yscale*(area[3] - area[2]));
                 cairo_fill(cr);
                 SET_COLOR_OPACITY(cr, color, 1);
+                enclosed_area += (area[1] - area[0])*(area[3] - area[2]);
             }
 #endif
             return;
@@ -727,9 +730,11 @@ void draw_implicit_rec(expression *expr, file_data *fd, cairo_t *cr, uint8_t *co
                     if ((e00 > 0) || (e10 < 0)) {
                         cairo_line_to(cr, sx0, sy1);
                         cairo_line_to(cr, sx0, sy0);
+                        enclosed_area += ((spos + npos)/2 - x0) * (y1 - y0);
                     } else {
                         cairo_line_to(cr, sx1, sy1);
                         cairo_line_to(cr, sx1, sy0);
+                        enclosed_area += (x1 - (spos + npos)/2) * (y1 - y0);
                     }
                     cairo_close_path(cr);
                     cairo_fill(cr);
@@ -750,9 +755,11 @@ void draw_implicit_rec(expression *expr, file_data *fd, cairo_t *cr, uint8_t *co
                     if ((e00 > 0) || (e01 < 0)) {
                         cairo_line_to(cr, sx1, sy0);
                         cairo_line_to(cr, sx0, sy0);
+                        enclosed_area += ((epos + wpos)/2 - y0) * (x1 - x0);
                     } else {
                         cairo_line_to(cr, sx1, sy1);
                         cairo_line_to(cr, sx0, sy1);
+                        enclosed_area += (y1 - (epos + wpos)/2) * (x1 - x0);
                     }
                     cairo_close_path(cr);
                     cairo_fill(cr);
@@ -770,10 +777,12 @@ void draw_implicit_rec(expression *expr, file_data *fd, cairo_t *cr, uint8_t *co
                     SET_COLOR_OPACITY(cr, color, 0.5);
                     if ((e11 > 0) || (e01 < 0)) {
                         cairo_line_to(cr, sx1, sy1);
+                        enclosed_area += (x1 - npos)*(y1 - epos)/2;
                     } else {
                         cairo_line_to(cr, sx0, sy1);
                         cairo_line_to(cr, sx0, sy0);
                         cairo_line_to(cr, sx1, sy0);
+                        enclosed_area += (y1 - y0)*(x1 - x0) - (x1 - npos)*(y1 - epos)/2;
                     }
                     cairo_close_path(cr);
                     cairo_fill(cr);
@@ -791,10 +800,12 @@ void draw_implicit_rec(expression *expr, file_data *fd, cairo_t *cr, uint8_t *co
                     SET_COLOR_OPACITY(cr, color, 0.5);
                     if ((e10 > 0) || (e00 < 0)) {
                         cairo_line_to(cr, sx1, sy0);
+                        enclosed_area += (spos - x1)*(epos - y0)/2;
                     } else {
                         cairo_line_to(cr, sx0, sy0);
                         cairo_line_to(cr, sx0, sy1);
                         cairo_line_to(cr, sx1, sy1);
+                        enclosed_area += (y1 - y0)*(x1 - x0) - (spos - x1)*(epos - y0)/2;
                     }
                     cairo_close_path(cr);
                     cairo_fill(cr);
@@ -812,10 +823,12 @@ void draw_implicit_rec(expression *expr, file_data *fd, cairo_t *cr, uint8_t *co
                     SET_COLOR_OPACITY(cr, color, 0.5);
                     if ((e10 < 0) || (e00 > 0)) {
                         cairo_line_to(cr, sx0, sy0);
+                        enclosed_area += (spos - x0)*(wpos - y0)/2;
                     } else {
                         cairo_line_to(cr, sx1, sy0);
                         cairo_line_to(cr, sx1, sy1);
                         cairo_line_to(cr, sx0, sy1);
+                        enclosed_area += (y1 - y0)*(x1 - x0) - (spos - x0)*(wpos - y0)/2;
                     }
                     cairo_close_path(cr);
                     cairo_fill(cr);
@@ -833,10 +846,12 @@ void draw_implicit_rec(expression *expr, file_data *fd, cairo_t *cr, uint8_t *co
                     SET_COLOR_OPACITY(cr, color, 0.5);
                     if ((e01 > 0) || (e00 < 0)) {
                         cairo_line_to(cr, sx0, sy1);
+                        enclosed_area += (npos - x0)*(y1 - wpos)/2;
                     } else {
                         cairo_line_to(cr, sx1, sy1);
                         cairo_line_to(cr, sx1, sy0);
                         cairo_line_to(cr, sx0, sy0);
+                        enclosed_area += (y1 - y0)*(x1 - x0) - (npos - x0)*(y1 - wpos)/2;
                     }
                     cairo_close_path(cr);
                     cairo_fill(cr);
@@ -882,7 +897,9 @@ void draw_implicit(expression *expr, file_data *fd, uint8_t *color, cairo_t *cr)
         vbuf[i] = NAN;
         hbuf[i] = NAN;
     }
+    enclosed_area = 0;
     draw_implicit_rec(expr, fd, cr, color, temp, 0, vbuf, hbuf, 0x00);
+    printf("Enclosed area is %f\n", enclosed_area);
     free(vbuf);
     free(hbuf);
     expr->func->oper = old_oper;

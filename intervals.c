@@ -632,6 +632,37 @@ void miexp(double *hstackpos, double *lstackpos) {
     lstackpos[0] = exp(lstackpos[0]);
 }
 
+void mifac(double *hstackpos, double *lstackpos) {
+    if (lstackpos[0] <= -1) {
+        if (ceil(lstackpos[0]) <= floor(hstackpos[0])) {
+            lstackpos[0] = -INFINITY;
+            hstackpos[0] = INFINITY;
+        } else {
+            int i = floor(lstackpos[0]);
+            // Note that x! is tangent to pi/(-1-x)! for x<1
+            // The extremum between i and i+1 is to the right of 0.5+i-arctan(ln(-i)/pi)/pi
+            // and to the left of 0.5+i-arctan(ln(-i-1)/pi)/pi
+            double left = 0.5+i-atan(log(-i)/M_PI)/M_PI;
+            double right = 0.5+i-atan(log(-i-1)/M_PI)/M_PI;
+            double l = mfac(lstackpos[0]);
+            double h = mfac(hstackpos[0]);
+            hstackpos[0] = fmax(l, h);
+            lstackpos[0] = fmin(l, h);
+            if ((lstackpos[0] < right) || (hstackpos[0] > left)) {
+                if ((-i) % 2) lstackpos[0] = M_PI/mfac(-i-1);
+                else hstackpos[0] = -M_PI/mfac(-i-1);
+            }
+        }
+    } else if (hstackpos[0] <= 0.4616321449683623413) {
+        double temp = lstackpos[0];
+        lstackpos[0] = mfac(hstackpos[0]);
+        hstackpos[0] = mfac(temp);
+    } else {
+        lstackpos[0] = mfac(lstackpos[0]);
+        hstackpos[0] = mfac(hstackpos[0]);
+    }
+}
+
 uint32_t interval_cosine(void *f, double *hstackpos, double *lstackpos) {
     return interval_general_one_arg(f, hstackpos, lstackpos, micos);
 }
@@ -652,6 +683,26 @@ uint32_t interval_arctan(void *f, double *hstackpos, double *lstackpos) {
 
 uint32_t interval_exp(void *f, double *hstackpos, double *lstackpos) {
     return interval_general_one_arg(f, hstackpos, lstackpos, miexp);
+}
+
+uint32_t interval_factorial(void *f, double *hstackpos, double *lstackpos) {
+    return interval_general_one_arg(f, hstackpos, lstackpos, mifac);
+}
+
+uint32_t interval_conjugate(void *f, double *hstackpos, double *lstackpos) {
+    function *fs = (function*)f;
+    uint32_t type = fs->first_arg->inter(fs->first_arg, hstackpos, lstackpos);
+    uint32_t len = type>>8;
+    if (IS_TYPE(type, TYPE_POINT)) {
+        double temp;
+        for (uint32_t i=1; i < len; i += 2) {
+            temp = lstackpos[i];
+            lstackpos[i] = -hstackpos[i];
+            hstackpos[i] = -temp;
+        }
+    }
+    apply_sign(fs->value_type, hstackpos, lstackpos, 0, len);
+    return type;
 }
 
 uint32_t interval_list(void *f, double *hstackpos, double *lstackpos) {
