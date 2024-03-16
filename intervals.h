@@ -20,6 +20,7 @@ uint32_t interval_arctan(void *f, double *hstackpos, double *lstackpos);
 uint32_t interval_exp(void *f, double *hstackpos, double *lstackpos);
 uint32_t interval_factorial(void *f, double *hstackpos, double *lstackpos);
 uint32_t interval_conjugate(void *f, double *hstackpos, double *lstackpos);
+uint32_t interval_abs(void *f, double *hstackpos, double *lstackpos);
 
 uint32_t interval_point(void *f, double *hstackpos, double *lstackpos);
 uint32_t interval_list(void *f, double *hstackpos, double *lstackpos);

@@ -1762,7 +1762,7 @@ const oper_data oper_list[N_OPERATORS] = {
     {func_log, "func_log", NULL},
     {func_exp, "func_exp", interval_exp},
     {func_factorial, "func_factorial", interval_factorial},
-    {func_abs, "func_abs", NULL},
+    {func_abs, "func_abs", interval_abs},
     {func_add, "func_add", interval_add},
     {func_multiply, "func_multiply", interval_multiply},
     {func_exponentiate, "func_exponentiate", interval_exponentiate},

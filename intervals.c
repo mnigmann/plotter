@@ -663,6 +663,17 @@ void mifac(double *hstackpos, double *lstackpos) {
     }
 }
 
+void miabs(double *hstackpos, double *lstackpos) {
+    if (hstackpos[0] < 0) {
+        double temp = lstackpos[0];
+        lstackpos[0] = -hstackpos[0];
+        hstackpos[0] = -temp;
+    } else if (lstackpos[0] < 0) {
+        hstackpos[0] = fmax(hstackpos[0], -lstackpos[0]);
+        lstackpos[0] = 0;
+    }
+}
+
 uint32_t interval_cosine(void *f, double *hstackpos, double *lstackpos) {
     return interval_general_one_arg(f, hstackpos, lstackpos, micos);
 }
@@ -703,6 +714,10 @@ uint32_t interval_conjugate(void *f, double *hstackpos, double *lstackpos) {
     }
     apply_sign(fs->value_type, hstackpos, lstackpos, 0, len);
     return type;
+}
+
+uint32_t interval_abs(void *f, double *hstackpos, double *lstackpos) {
+    return interval_general_one_arg(f, hstackpos, lstackpos, miabs);
 }
 
 uint32_t interval_list(void *f, double *hstackpos, double *lstackpos) {
