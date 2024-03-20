@@ -174,8 +174,9 @@ void shift_blocks(function *function_list, uint32_t start, uint32_t num) {
 }
 
 int insert_product_term(function *function_list, uint32_t last_pos, uint32_t func_pos, uint32_t init_pos) {
-    if (func_pos) {
+    if (func_pos > init_pos) {
         if (last_pos == init_pos) {
+            printf("inserting multiplication, last_pos %d, func_pos %d, init_pos %d\n", last_pos, func_pos, init_pos);
             // If last_pos is zero but func_pos is not, then one product term has already been
             // inserted. Thus, we must insert a multiplication block
             shift_blocks(function_list, last_pos, func_pos-last_pos);
@@ -577,17 +578,18 @@ uint32_t parse_latex_rec(char *latex, int end, function *function_list, double *
 
     // Decompose commas
     last_term = 0;
-    last_pos = *func_pos;
     for (int i=0; i < end; i++) {
         i = get_next_match(latex, i, end, ',');
         if (n_terms && (i == -1)) i = end;
         if (i >= 0) {
-            printf("comma term %.*s, func_pos %d\n", i - last_term, latex+last_term, *func_pos);
+            print_function_table(function_list, 1);
+            printf("comma term %.*s, func_pos %d, last_pos %d, n_terms %d\n", i - last_term, latex+last_term, *func_pos, last_pos, n_terms);
             
             if (n_terms > 0) {
                 // If a term has already been found, chain it
-                printf("Chaining comma term with flags %02x\n", flags);
+                printf("Chaining comma term %d to %d with flags %02x\n", *func_pos, last_pos, flags);
                 function_list[last_pos].next_arg = function_list + *func_pos;
+                print_function_table(function_list, 1);
             }
             last_pos = *func_pos;
             flags = 0;
@@ -595,6 +597,7 @@ uint32_t parse_latex_rec(char *latex, int end, function *function_list, double *
             *result_flags |= flags;
             last_term = i+1;
             n_terms++;
+            print_function_table(function_list, 1);
         } else break;
     }
     if (n_terms) {
@@ -771,6 +774,7 @@ uint32_t parse_latex_rec(char *latex, int end, function *function_list, double *
     uint8_t in_command = 0;
     int idx_end = 0;
     uint32_t (*oper)(void*, double*);
+    last_pos = *func_pos;
     for (int i=0; i < end; i++) {
         // Check if the previous term has an index. If it does, we must apply the index by moving
         // the term code down one function block and inserting the index block above it.
@@ -925,6 +929,7 @@ uint32_t parse_latex_rec(char *latex, int end, function *function_list, double *
                 printf("Variable is %.*s\n", end-arg1_start-1, latex+arg1_start+1);
                 printf("Initial value is %.*s\n", subscript-i-2, latex+i+2);
                 printf("Final value is %.*s\n", superscript-subscript-3, latex+subscript+3);
+                *func_pos = insert_product_term(function_list, last_pos, *func_pos, init_pos);
                 last_pos = *func_pos;
                 function_list[*func_pos] = new_function(func_integrate_gsl, NULL, function_list + *func_pos + 1);
                 (*func_pos)++;
@@ -1469,6 +1474,13 @@ uint8_t check_fixed(variable *variable_list, function *func) {
  */
 uint8_t evaluate_branch(function *function_list, function *func, int *func_pos, double **stackpos, uint8_t include_fixed, variable *local, int n_local) {
     function *arg = func->first_arg;
+    if ((func->oper == func_sum) || (func->oper == func_prod) || (func->oper == func_integrate_gsl)) {
+        variable *idx = (variable*)(arg->value);
+        printf("idx id %p\n", idx);
+        idx->flags |= VARIABLE_NOT_FIXED;
+        local = idx;
+    }
+    // If the previous block ran then this one won't
     if (arg == NULL) {
         if (func->value_type & 0x40) {
             variable *var = ((variable*)(func->value));
@@ -1496,30 +1508,14 @@ uint8_t evaluate_branch(function *function_list, function *func, int *func_pos, 
     }
     uint8_t fixed = 0x7, f;
     while (arg) {
-        if ((arg->oper == func_sum) || (arg->oper == func_prod) || (arg->oper == func_integrate_gsl)) {
-            variable *idx = (variable*)(arg->first_arg->value);
-            idx->flags |= VARIABLE_NOT_FIXED;
-            f = evaluate_branch(function_list, arg, func_pos, stackpos, include_fixed, idx, 1);
-            //printf("sum found over %s, return code %d\n", idx->name, f);
-            // If a sum or product returns E, then at some point, we encountered a
-            // variable that depends on x or y. Alternatively, we could have encountered
-            // a local variable from higher up in the tree. Thus, this could lead to
-            // issues when we have nested sums. 
-            // TODO: return L when there is no x/y dependency
-            if (!f) f = 0x1;
-            if (f == 0x3) f = 0x7;
-            idx->flags &= ~VARIABLE_NOT_FIXED;
-        } else {
-            f = evaluate_branch(function_list, arg, func_pos, stackpos, include_fixed, local, n_local);
-        }
-        // If one of the arguments returns E, then the whole thing must return E
-        if (!f) return 0;
+        f = evaluate_branch(function_list, arg, func_pos, stackpos, include_fixed, local, n_local);
+        // Only if the branch does not depend on and local variables can it be evaluated
         if ((f == 0x7) && (arg->oper != func_value)) arg->value_type |= 0x20;
         fixed &= f;
         arg = arg->next_arg;
     }
     uint32_t argtype;
-    if (fixed == 0x1) {
+    if (fixed <= 0x1) {
         arg = func->first_arg;
         while (arg) {
             if (arg->value_type & 0x20) {
@@ -1547,6 +1543,9 @@ uint8_t evaluate_branch(function *function_list, function *func, int *func_pos, 
             arg = arg->next_arg;
         }
     }
+    if ((func->oper == func_sum) || (func->oper == func_prod) || (func->oper == func_integrate_gsl)) local->flags &= ~VARIABLE_NOT_FIXED;
+    if (!fixed) fixed = 0x1;
+    if (fixed == 0x3) fixed = 0x7;
     return fixed;
 }
 

@@ -535,6 +535,239 @@ void draw_function_constant_ds(expression *expr, file_data *fd, uint8_t *color, 
     }
 }
 
+void follow_contour(expression *expr, file_data *fd, cairo_t *cr, uint8_t *color, double *area, double e00, double e10, double e11, double e01, uint8_t start_edge) {
+    double *stackpos = fd->stack + fd->n_stack;
+    double x0 = area[0], x1 = area[1], y0 = area[2], y1 = area[3];
+
+    double bx0 = x0, bx1 = x1, by0 = y0, by1 = y1;
+    double be00 = e00, be10 = e10, be11 = e11, be01 = e01;
+    double center;
+    switch (start_edge) {
+        case 0:
+            // north edge
+            for (uint8_t i=0; i < 3; i++) {
+                center = (bx0 + bx1)/2;
+                eval_func_2d(&center, &y1, expr, stackpos);
+                if (((stackpos[0] >= 0) && (be01 <= 0)) || ((stackpos[0] <= 0) && (be01 >= 0))) {
+                    // Contour is between bx0 and center
+                    bx1 = center;
+                    be11 = stackpos[0];
+                } else {
+                    // Contour is between center and bx1
+                    bx0 = center;
+                    be01 = stackpos[0];
+                }
+                by0 = (by0 + by1)/2;
+            }
+            eval_func_2d(&bx0, &by0, expr, stackpos);
+            be00 = stackpos[0];
+            eval_func_2d(&bx1, &by0, expr, stackpos);
+            be10 = stackpos[0];
+            printf("North edge (%f) converged from [%f, %f] to [%f, %f]\n", y1, x0, x1, bx0, bx1);
+            break;
+        case 1:
+            // east edge
+            for (uint8_t i=0; i < 3; i++) {
+                center = (by0 + by1)/2;
+                eval_func_2d(&x1, &center, expr, stackpos);
+                if (((stackpos[0] >= 0) && (be10 <= 0)) || ((stackpos[0] <= 0) && (be10 >= 0))) {
+                    // Contour is between by0 and center
+                    by1 = center;
+                    be11 = stackpos[0];
+                } else {
+                    // Contour is between center and by1
+                    by0 = center;
+                    be10 = stackpos[0];
+                }
+                bx0 = (bx0 + bx1)/2;
+            }
+            eval_func_2d(&bx0, &by0, expr, stackpos);
+            be00 = stackpos[0];
+            eval_func_2d(&bx0, &by1, expr, stackpos);
+            be01 = stackpos[0];
+            printf("East edge (%f) converged from [%f, %f] to [%f, %f]\n", x1, y0, y1, by0, by1);
+            break;
+        case 2:
+            // south edge
+            for (uint8_t i=0; i < 3; i++) {
+                center = (bx0 + bx1)/2;
+                eval_func_2d(&center, &y0, expr, stackpos);
+                if (((stackpos[0] >= 0) && (be00 <= 0)) || ((stackpos[0] <= 0) && (be00 >= 0))) {
+                    // Contour is between bx0 and center
+                    bx1 = center;
+                    be10 = stackpos[0];
+                } else {
+                    // Contour is between center and bx1
+                    bx0 = center;
+                    be00 = stackpos[0];
+                }
+                by1 = (by0 + by1)/2;
+            }
+            eval_func_2d(&bx0, &by1, expr, stackpos);
+            be01 = stackpos[0];
+            eval_func_2d(&bx1, &by1, expr, stackpos);
+            be11 = stackpos[0];
+            printf("South edge (%f) converged from [%f, %f] to [%f, %f]\n", y0, x0, x1, bx0, bx1);
+            break;
+        case 3:
+            // west edge
+            for (uint8_t i=0; i < 3; i++) {
+                center = (by0 + by1)/2;
+                eval_func_2d(&x0, &center, expr, stackpos);
+                if (((stackpos[0] >= 0) && (be00 <= 0)) || ((stackpos[0] <= 0) && (be00 >= 0))) {
+                    // Contour is between by0 and center
+                    by1 = center;
+                    be01 = stackpos[0];
+                } else {
+                    // Contour is between center and by1
+                    by0 = center;
+                    be00 = stackpos[0];
+                }
+                bx1 = (bx0 + bx1)/2;
+            }
+            eval_func_2d(&bx1, &by0, expr, stackpos);
+            be10 = stackpos[0];
+            eval_func_2d(&bx1, &by1, expr, stackpos);
+            be11 = stackpos[0];
+            printf("West edge (%f) converged from [%f, %f] to [%f, %f]\n", x0, y0, y1, by0, by1);
+            break;
+        default:
+            break;
+    }
+    double dx = bx1-bx0;
+    double dy = by1-by0;
+    double npos, epos, spos, wpos;
+    uint8_t edges = 0, edge_mask = ~(1<<start_edge);
+    for (uint8_t i=0; i < 10; i++) {
+        cairo_rectangle(cr, SCALE_XK(bx0), SCALE_YK(by1), xscale*(bx1 - bx0), yscale*(by1 - by0));
+        cairo_stroke(cr);
+        //return;
+        edges = 0;
+        if ((be00 != be10) && (((be00 <= 0) && (be10 >= 0)) || ((be00 >= 0) && (be10 <= 0)))) {
+            // south edge
+            edges |= 0x4;
+            spos = bx0 - be00*(bx1 - bx0)/(be10 - be00);
+        }
+        if ((be10 != be11) && (((be10 <= 0) && (be11 >= 0)) || ((be10 >= 0) && (be11 <= 0)))) {
+            // east edge
+            edges |= 0x2;
+            epos = by0 - be10*(by1 - by0)/(be11 - be10);
+        }
+        if ((be11 != be01) && (((be11 <= 0) && (be01 >= 0)) || ((be11 >= 0) && (be01 <= 0)))) {
+            // north edge
+            edges |= 0x1;
+            npos = bx0 - be01*(bx0 - bx1)/(be01 - be11);
+        }
+        if ((be01 != be00) && (((be01 <= 0) && (be00 >= 0)) || ((be01 >= 0) && (be00 <= 0)))) {
+            // west edge
+            edges |= 0x8;
+            wpos = by0 - be00*(by0 - by1)/(be00 - be01);
+        }
+        double sx0 = SCALE_XK(bx0), sx1 = SCALE_XK(bx1), sy0 = SCALE_YK(by0), sy1 = SCALE_YK(by1);
+        double snpos = SCALE_XK(npos), sepos = SCALE_YK(epos), sspos = SCALE_XK(spos), swpos = SCALE_YK(wpos);
+        switch (edges) {
+            case 0xf:
+                // If all four edges are selected, we know that all of the corners have
+                // different values from their neighbors. No more than two corners can
+                // be zero and they must be on opposite corners. If we sample two adjacent
+                // corners, at least one will not be zero
+                cairo_move_to(cr, sspos, sy0);
+                cairo_line_to(cr, snpos, sy1);
+                cairo_stroke(cr);
+                cairo_move_to(cr, sx0, swpos);
+                cairo_line_to(cr, sx1, sepos);
+                cairo_stroke(cr);
+                break;
+            case 0x7:
+            case 0xd:
+            case 0x5:
+                cairo_move_to(cr, sspos, sy0);
+                cairo_line_to(cr, snpos, sy1);
+                cairo_stroke(cr);
+                break;
+            case 0xb:
+            case 0xe:
+            case 0xa:
+                cairo_move_to(cr, sx0, swpos);
+                cairo_line_to(cr, sx1, sepos);
+                cairo_stroke(cr);
+                break;
+            case 0x3:
+                cairo_move_to(cr, sx1, sepos);
+                cairo_line_to(cr, snpos, sy1);
+                cairo_stroke(cr);
+                break;
+            case 0x6:
+                cairo_move_to(cr, sx1, sepos);
+                cairo_line_to(cr, sspos, sy0);
+                cairo_stroke(cr);
+                break;
+            case 0xc:
+                cairo_move_to(cr, sx0, swpos);
+                cairo_line_to(cr, sspos, sy0);
+                cairo_stroke(cr);
+                break;
+            case 0x9:
+                cairo_move_to(cr, sx0, swpos);
+                cairo_line_to(cr, snpos, sy1);
+                cairo_stroke(cr);
+                break;
+            default:
+                break;
+        }
+        edges &= edge_mask;
+        edge_mask = 0xf;
+        printf("[%f, %f], [%f, %f] --> e00 %f, e10 %f, e11 %f, e01 %f --> %x\n", bx0, bx1, by0, by1, be00, be10, be11, be01, edges);
+        if (edges & 0x1) {
+            // Contour passes through the north edge
+            by0 += dy;
+            by1 += dy;
+            be00 = be01;
+            be10 = be11;
+            eval_func_2d(&bx0, &by1, expr, stackpos);
+            be01 = stackpos[0];
+            eval_func_2d(&bx1, &by1, expr, stackpos);
+            be11 = stackpos[0];
+            edge_mask &= ~0x4;
+        } else if (edges & 0x2) {
+            // Contour passes through the east edge
+            bx0 += dx;
+            bx1 += dx;
+            be00 = be10;
+            be01 = be11;
+            eval_func_2d(&bx1, &by0, expr, stackpos);
+            be10 = stackpos[0];
+            eval_func_2d(&bx1, &by1, expr, stackpos);
+            be11 = stackpos[0];
+            edge_mask &= ~0x8;
+        } else if (edges & 0x4) {
+            // Contour passes through the south edge
+            by0 -= dy;
+            by1 -= dy;
+            be01 = be00;
+            be11 = be10;
+            eval_func_2d(&bx0, &by0, expr, stackpos);
+            be00 = stackpos[0];
+            eval_func_2d(&bx1, &by0, expr, stackpos);
+            be10 = stackpos[0];
+            edge_mask &= ~0x1;
+        } else if (edges & 0x8) {
+            // Contour passes through the west edge
+            bx0 -= dx;
+            bx1 -= dx;
+            be10 = be00;
+            be11 = be01;
+            eval_func_2d(&bx0, &by0, expr, stackpos);
+            be00 = stackpos[0];
+            eval_func_2d(&bx0, &by1, expr, stackpos);
+            be01 = stackpos[0];
+            edge_mask &= ~0x2;
+        }
+    }
+    cairo_rectangle(cr, SCALE_XK(bx0), SCALE_YK(by1), xscale*(bx1 - bx0), yscale*(by1 - by0));
+    cairo_stroke(cr);
+}
+
 void draw_implicit_rec(expression *expr, file_data *fd, cairo_t *cr, uint8_t *color, double *area, int divisions, double *vbuf, double *hbuf, uint8_t buf_valid) {
     /*fd->variable_list[0].pointer = area;
     fd->variable_list[0].type = 1<<8;
@@ -543,7 +776,7 @@ void draw_implicit_rec(expression *expr, file_data *fd, cairo_t *cr, uint8_t *co
     double *stackpos = fd->stack + fd->n_stack;
     double *lstackpos = fd->lstack;
     eval_inter_2d(area, area+2, expr, stackpos, lstackpos);
-    uint32_t bufsize = (1<<(PLOT_IMPLICIT_MAXDEPTH - divisions))+1;
+    uint32_t bufsize = (1<<(PLOT_IMPLICIT_HARDMAX - divisions))+1;
     //expr->func->inter(expr->func, stackpos, lstackpos);
     //niev++;
     function *func = expr->func;
@@ -578,7 +811,7 @@ void draw_implicit_rec(expression *expr, file_data *fd, cairo_t *cr, uint8_t *co
         }
         return;
     }
-    if (divisions >= PLOT_IMPLICIT_MAXDEPTH) {
+    if ((divisions == PLOT_IMPLICIT_MAXDEPTH) || (divisions >= PLOT_IMPLICIT_HARDMAX)) {
         // Maximum depth reached
         //printf("    maximum depth reached on ([%f, %f], [%f, %f]) --> [%f, %f]\n", area[0], area[1], area[2], area[3], lstackpos[0], stackpos[0]);
         //cairo_rectangle(cr, SCALE_XK(area[0]), SCALE_YK(area[3]), xscale*(area[1] - area[0]), yscale*(area[3] - area[2]));
@@ -593,23 +826,19 @@ void draw_implicit_rec(expression *expr, file_data *fd, cairo_t *cr, uint8_t *co
             eval_func_2d(&x0, &y0, expr, stackpos); 
             e00 = stackpos[0];
         }
-        if (hbuf[1] == hbuf[1]) e10 = hbuf[1];
+        if (hbuf[bufsize-1] == hbuf[bufsize-1]) e10 = hbuf[bufsize-1];
         else {
             eval_func_2d(&x1, &y0, expr, stackpos); 
             e10 = stackpos[0];
         }
-        if (vbuf[1] == vbuf[1]) {
-            e01 = vbuf[1];
+        if (vbuf[bufsize-1] == vbuf[bufsize-1]) {
+            e01 = vbuf[bufsize-1];
         } else {
             eval_func_2d(&x0, &y1, expr, stackpos); 
             e01 = stackpos[0];
         }
         eval_func_2d(&x1, &y1, expr, stackpos); 
         e11 = stackpos[0];
-        vbuf[0] = e10;
-        vbuf[1] = e11;
-        hbuf[0] = e01;
-        hbuf[1] = e11;
 
         if ((e00 > 0) && (e10 > 0) && (e11 > 0) && (e01 > 0)) {
             // Interval calculation was wrong
@@ -622,6 +851,14 @@ void draw_implicit_rec(expression *expr, file_data *fd, cairo_t *cr, uint8_t *co
                 enclosed_area += (area[1] - area[0])*(area[3] - area[2]);
             }
 #endif
+            vbuf[0] = e10;
+            vbuf[bufsize-1] = e11;
+            hbuf[0] = e01;
+            hbuf[bufsize-1] = e11;
+            for (int i=1; i < bufsize - 1; i++) {
+                hbuf[i] = NAN;
+                vbuf[i] = NAN;
+            }
             return;
         }
         if (isinf(stackpos[0]) || isinf(lstackpos[0])) {
@@ -658,22 +895,41 @@ void draw_implicit_rec(expression *expr, file_data *fd, cairo_t *cr, uint8_t *co
             edges |= 0x8;
             wpos = y0 - e00*(y0 - y1)/(e00 - e01);
         }
-        /*if (((singular) || (edges == 0)) && (divisions < PLOT_IMPLICIT_HARDMAX)) {
-            //printf("Unresolved detail in ([%f, %f], [%f, %f])\n", area[0], area[1], area[2], area[3]);
+        /*if (edges & 0x1) follow_contour(expr, fd, cr, color, area, e00, e10, e11, e01, 0);
+        else if (edges & 0x2) follow_contour(expr, fd, cr, color, area, e00, e10, e11, e01, 1);
+        else if (edges & 0x4) follow_contour(expr, fd, cr, color, area, e00, e10, e11, e01, 2);
+        else if (edges & 0x8) follow_contour(expr, fd, cr, color, area, e00, e10, e11, e01, 3);*/
+        //if (divisions == PLOT_IMPLICIT_MAXDEPTH) printf("([%f, %f], [%f, %f]) --> edgex %x, e00 %f, e10 %f, e11 %f, e01 %f\n", area[0], area[1], area[2], area[3], edges, e00, e10, e11, e01);
+        if (((singular) || (edges)) && (divisions < PLOT_IMPLICIT_HARDMAX)) {
+            //printf("    Unresolved detail in ([%f, %f], [%f, %f])\n", area[0], area[1], area[2], area[3]);
             // Subdivide
             double x0 = area[0], x1 = area[1], y0 = area[2], y1 = area[3];
             double xm = (x0 + x1)/2, ym = (y0 + y1)/2;
             //printf("subdividing ([%f, %f], [%f, %f]), %f, %f\n", x0, x1, y0, y1, xm, ym);
+            // Bottom left box
+            uint8_t temp_buf_valid;
             area[1] = xm; area[3] = ym;
-            draw_implicit_rec(expr, fd, cr, color, area, divisions+1);
+            draw_implicit_rec(expr, fd, cr, color, area, divisions+1, vbuf, hbuf, buf_valid);
+            // Bottom right box
             area[0] = xm; area[1] = x1; area[2] = y0; area[3] = ym;
-            draw_implicit_rec(expr, fd, cr, color, area, divisions+1);
+            draw_implicit_rec(expr, fd, cr, color, area, divisions+1, vbuf, hbuf+(bufsize>>1), 0x01);
+            // Top left box
             area[0] = x0; area[1] = xm; area[2] = ym; area[3] = y1;
-            draw_implicit_rec(expr, fd, cr, color, area, divisions+1);
+            draw_implicit_rec(expr, fd, cr, color, area, divisions+1, vbuf+(bufsize>>1), hbuf, 0x02);
+            // Top right box
             area[0] = xm; area[1] = x1; area[2] = ym; area[3] = y1;
-            draw_implicit_rec(expr, fd, cr, color, area, divisions+1);
+            draw_implicit_rec(expr, fd, cr, color, area, divisions+1, vbuf+(bufsize>>1), hbuf+(bufsize>>1), 0x01);
             return;
-        }*/
+        } else {
+            vbuf[0] = e10;
+            vbuf[bufsize-1] = e11;
+            hbuf[0] = e01;
+            hbuf[bufsize-1] = e11;
+            for (int i=1; i < bufsize - 1; i++) {
+                hbuf[i] = NAN;
+                vbuf[i] = NAN;
+            }
+        }
         // If two edges are selected, then draw the line between those two edges. If three 
         // edges are selected, then one of the corners must be zero so the contour must go
         // through one of the corners. If four edges are selected, there are two contour
@@ -891,8 +1147,8 @@ void draw_implicit(expression *expr, file_data *fd, uint8_t *color, cairo_t *cr)
     if (expr->func->oper == func_equals) expr->func->oper = func_sub;
     else if (expr->func->oper == func_compare_single) expr->func->oper = func_compare_sub_single;
     else if (expr->func->oper == func_compare) expr->func->oper = func_compare_sub;
-    double *vbuf = malloc(sizeof(double)*((1<<PLOT_IMPLICIT_MAXDEPTH)+1));
-    double *hbuf = malloc(sizeof(double)*((1<<PLOT_IMPLICIT_MAXDEPTH)+1));
+    double *vbuf = malloc(sizeof(double)*((1<<PLOT_IMPLICIT_HARDMAX)+1));
+    double *hbuf = malloc(sizeof(double)*((1<<PLOT_IMPLICIT_HARDMAX)+1));
     for (uint32_t i=0; i <= (1<<PLOT_IMPLICIT_MAXDEPTH); i++) {
         vbuf[i] = NAN;
         hbuf[i] = NAN;
