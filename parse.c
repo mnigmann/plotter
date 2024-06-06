@@ -1857,7 +1857,7 @@ expression *parse_file(file_data *fd, char *stringbuf) {
                     exprpos->flags |= EXPRESSION_ACTION;
                     break;
                 }
-                if (function_list[p].oper == func_value) {
+                if ((function_list[p].oper == func_value) && (function_list[p].value_type & 0x40)) {
                     // If the variable was created during parsing and is x-like, replace with x
                     tempvar = ((variable*)(function_list[p].value));
                     if (function_list[p].value_type & 0x40) printf("references variable %s (%02x)\n", tempvar->name, tempvar->flags);
