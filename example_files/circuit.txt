@@ -1,5 +1,5 @@
 ### Circuit simulator based on https://www.desmos.com/calculator/1hcvlujoio
-### Run with ./build/plotter examples/circuits.txt 0 100
+### Run with ./build/plotter example_files/circuit.txt 0 100
 ### Press 's' key to start simulation
 A_{run}
 t_{s}=5\cdot10^{-6}
@@ -21,7 +21,7 @@ Y_{0}=\left[4,4,4,4,0,-2,0,0,2,-2,4,-2,0,2\right]
 X_{1}=\left[4,-4,-4,4,-4,-4,0,0,4,4,0,0,-4,4\right]
 Y_{1}=\left[4,4,3,2,0,-3,1,-2,2,-2,3,-2,-2,-2\right]
 T=\left[2,2,5,1,7,5,1,1,9,2,1,2,1,7\right]
-V=\left[1200,500,0,0,0.000001,0,0,0,100000,100,0,100,0,0.000001\right]
+V=\left[1000,500,0,0,0.000001,0,0,0,100000,100,0,100,0,0.000001\right]
 
 ### Netlist generation
 N_{s0}=\left(X_{0},Y_{0}\right)\left[\left|T-T_{p}\right|\left|T-T_{g}\right|\left|T-T_{w}\right|>0\right]
