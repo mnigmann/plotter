@@ -3,6 +3,7 @@
 
 #define INIT_WIDTH 500
 #define INIT_HEIGHT 500
+#define INIT_SCALE 25
 #define COLOR_AXES 64
 #define COLOR_MAJOR_GRID 160
 #define COLOR_MINOR_GRID 220

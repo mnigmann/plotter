@@ -10,12 +10,6 @@
 #include "config.h"
 #include "treeview.h"
 
-#define SCALE_X(v) ((uint16_t)(250*(1+v)))
-#define SCALE_Y(v) ((uint16_t)(250*(1-v)))
-
-#define SCALE_XF(v) ((int64_t)(250L*(1<<16)*(1+v)))
-#define SCALE_YF(v) ((int64_t)(250L*(1<<16)*(1-v)))
-
 #define SCALE_XK(v) ((v - window_x0)*xscale)
 #define SCALE_YK(v) ((window_y1 - v)*yscale)
 
@@ -25,8 +19,6 @@
 #define SET_COLOR(cr, color) cairo_set_source_rgb(cr, color[0]/256.0, color[1]/256.0, color[2]/256.0)
 #define SET_COLOR_HEX(cr, color) cairo_set_source_rgb(cr, ((color>>16)&255)/256.0, ((color>>8)&255)/256.0, (color&255)/256.0)
 #define SET_COLOR_OPACITY(cr, color, opacity) cairo_set_source_rgba(cr, color[0]/256.0, color[1]/256.0, color[2]/256.0, opacity)
-
-#define TOIDX(x, y) (3*(x + y*WIDTH))
 
 #define GET_STEP(type) (step_table[(type) & TYPE_MASK])
 const static uint32_t step_table[8] = {1, 2, 3, 1, 1, MAX_POLYGON_SIZE*2, 0, 0};
@@ -1693,6 +1685,16 @@ static gboolean keypress_callback(GtkWidget *widget, GdkEventKey *event, gpointe
     } else if (event->keyval == 'i') {
         treeview_activate(fd);
         printf("inspecting\n");
+    } else if (event->keyval == GDK_KEY_Home) {
+        double w = da_width / INIT_SCALE, h = da_height / INIT_SCALE;
+        window_x0 = -w/2;
+        window_x1 = w/2;
+        window_y0 = -h/2;
+        window_y1 = h/2;
+        xscale = INIT_SCALE;
+        yscale = INIT_SCALE;
+        redraw_all(fd);
+        gtk_widget_queue_draw(fd->drawing_area);
     }
     expression *expr;
     function *action;
