@@ -1,8 +1,8 @@
 #ifndef CONFIG_H
 #define CONFIG_H
 
-#define WIDTH 500
-#define HEIGHT 500
+#define INIT_WIDTH 500
+#define INIT_HEIGHT 500
 #define COLOR_AXES 64
 #define COLOR_MAJOR_GRID 160
 #define COLOR_MINOR_GRID 220

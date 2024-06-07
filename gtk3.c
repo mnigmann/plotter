@@ -31,8 +31,6 @@
 #define GET_STEP(type) (step_table[(type) & TYPE_MASK])
 const static uint32_t step_table[8] = {1, 2, 3, 1, 1, MAX_POLYGON_SIZE*2, 0, 0};
 
-guchar data[3*WIDTH*HEIGHT];
-GdkPixbuf *pixbuf;
 double window_x0 = -10;
 double window_y0 = -10;
 double window_x1 = 10;
@@ -63,6 +61,10 @@ double click_x;
 double click_y;
 int ticker_target, ticker_step;
 uint8_t run_ticker;
+
+int da_width = INIT_WIDTH, da_height = INIT_HEIGHT;
+#define WIDTH da_width
+#define HEIGHT da_height
 
 uint32_t eval_index = 0;
 
@@ -1570,6 +1572,9 @@ void run_action(file_data *fd, function *action) {
 }
 
 static gboolean configure_callback(GtkWidget *widget, GdkEventConfigure *event, gpointer data_pointer) {
+    printf("drawingarea size is (%d, %d)\n", gtk_widget_get_allocated_width(widget), gtk_widget_get_allocated_height(widget));
+    da_width = gtk_widget_get_allocated_width(widget);
+    da_height = gtk_widget_get_allocated_height(widget);
     file_data *fd = (file_data*)(data_pointer);
     if (fd->surface) cairo_surface_destroy(fd->surface);
     fd->surface = gdk_window_create_similar_surface(gtk_widget_get_window(widget), CAIRO_CONTENT_COLOR,
