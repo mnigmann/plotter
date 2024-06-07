@@ -4,7 +4,7 @@
 #include "parse.h"
 #include "functions.h"
 
-function *function_list;
+//function *function_list;
 function *orig_addr;
 uint32_t n_func;
 

@@ -99,7 +99,7 @@ uint32_t func_value(void *f, double *stackpos) {
     return type;
 }
 
-double fdiv(double n, double d) {
+double mdiv(double n, double d) {
     return n/d;
 }
 
@@ -1492,7 +1492,7 @@ int compare_doubles(const void *a, const void *b) {
     return (arg1 > arg2) - (arg1 < arg2);
 }
 
-int compare_doubles_indirect(void *data, const void *a, const void *b) {
+int compare_doubles_indirect(const void *a, const void *b, void *data) {
     double *data_d = (double*)data;
     double arg1 = data_d[(int)(*(double*)a)];
     double arg2 = data_d[(int)(*(double*)b)];
@@ -1512,7 +1512,8 @@ uint32_t func_sort(void *f, double *stackpos) {
             stackpos[idxlen+i] = stackpos[i];
             stackpos[i] = i;
         }
-        qsort_r(stackpos, idxlen, sizeof(double), stackpos+idxlen, compare_doubles_indirect);
+        //qsort_r(stackpos, idxlen, sizeof(double), stackpos+idxlen, compare_doubles_indirect);
+        qsort_r(stackpos, idxlen, sizeof(double), compare_doubles_indirect, stackpos+idxlen);
         argtype = arg->oper(arg, stackpos+idxlen);
         argsize = argtype>>8;
         uint8_t step = GET_STEP(argtype);
@@ -1536,7 +1537,7 @@ uint32_t func_sort(void *f, double *stackpos) {
     }
 }
 
-int compare_generic_indirect(void *data_v, const void *a, const void *b) {
+int compare_generic_indirect(const void *a, const void *b, void *data_v) {
     void **data_s = (void**)(data_v);
     uint8_t step = *((uint8_t*)(data_s[0]));
     double *data = (double*)(data_s[1]);
@@ -1558,7 +1559,8 @@ uint32_t func_unique(void *f, double *stackpos) {
     uint32_t n = arglen / step;
     for (int i=0; i < n; i++) stackpos[arglen+i] = i;
     void *data[2] = {&step, stackpos};
-    qsort_r(stackpos+arglen, n, sizeof(double), data, compare_generic_indirect);
+    //qsort_r(stackpos+arglen, n, sizeof(double), data, compare_generic_indirect);
+    qsort_r(stackpos+arglen, n, sizeof(double), compare_generic_indirect, data);
     int j=arglen+1;
     for (int i=1; i < n; i++) {
         //print_object(256 | TYPE_POINT, stackpos+step*(int)stackpos[j-1]); printf(", "); print_object(256 | TYPE_POINT, stackpos+step*(int)stackpos[arglen+i]); printf("\n");

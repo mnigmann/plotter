@@ -3,7 +3,7 @@
 #include "parse.h"
 #include <stdint.h>
 #include <stdio.h>
-#include <lapack.h>
+#include <lapacke.h>
 #include <complex.h>
 #include <string.h>
 #include <time.h>
