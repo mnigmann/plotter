@@ -657,6 +657,11 @@ void mifac(double *hstackpos, double *lstackpos) {
         double temp = lstackpos[0];
         lstackpos[0] = mfac(hstackpos[0]);
         hstackpos[0] = mfac(temp);
+    } else if (lstackpos[0] <= 0.4616321449683623413) {
+        hstackpos[0] = mfac(hstackpos[0]);
+        double temp = mfac(lstackpos[0]);
+        if (temp > hstackpos[0]) hstackpos[0] = temp;
+        lstackpos[0] = 0.885603194411;
     } else {
         lstackpos[0] = mfac(lstackpos[0]);
         hstackpos[0] = mfac(hstackpos[0]);
