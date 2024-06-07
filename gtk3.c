@@ -1149,7 +1149,7 @@ void draw_implicit(expression *expr, file_data *fd, uint8_t *color, cairo_t *cr)
     else if (expr->func->oper == func_compare) expr->func->oper = func_compare_sub;
     double *vbuf = malloc(sizeof(double)*((1<<PLOT_IMPLICIT_HARDMAX)+1));
     double *hbuf = malloc(sizeof(double)*((1<<PLOT_IMPLICIT_HARDMAX)+1));
-    for (uint32_t i=0; i <= (1<<PLOT_IMPLICIT_MAXDEPTH); i++) {
+    for (uint32_t i=0; i <= (1<<PLOT_IMPLICIT_HARDMAX); i++) {
         vbuf[i] = NAN;
         hbuf[i] = NAN;
     }
