@@ -930,6 +930,9 @@ void draw_implicit_rec(expression *expr, file_data *fd, cairo_t *cr, uint8_t *co
         // lines, each going through opposite sides of the area.
         double sx0 = SCALE_XK(x0), sx1 = SCALE_XK(x1), sy0 = SCALE_YK(y0), sy1 = SCALE_YK(y1);
         double snpos = SCALE_XK(npos), sepos = SCALE_YK(epos), sspos = SCALE_XK(spos), swpos = SCALE_YK(wpos);
+        // If any of the corners is undefined, draw nothing
+        if ((e00 != e00) || (e01 != e01) || (e10 != e10) || (e11 != e11)) return;
+        if (isinf(e00) || isinf(e01) || isinf(e10) || isinf(e11)) return;
         // If the contout passes through two corners, only draw one line
         if ((edges == 0xf) && (((e00 == 0) && (e11 == 0)) || ((e10 == 0) && (e01 == 0)))) edges = 0x5;
         switch (edges) {
@@ -953,8 +956,8 @@ void draw_implicit_rec(expression *expr, file_data *fd, cairo_t *cr, uint8_t *co
                         cairo_line_to(cr, sspos, sy0);
                         cairo_line_to(cr, snpos, sy1);
                         cairo_line_to(cr, sx0, sy1);
-                        cairo_line_to(cr, sx0, sepos);
-                        cairo_line_to(cr, sx1, swpos);
+                        cairo_line_to(cr, sx0, swpos);
+                        cairo_line_to(cr, sx1, sepos);
                     }
                     cairo_close_path(cr);
                     cairo_fill(cr);
