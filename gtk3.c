@@ -1681,8 +1681,12 @@ static gboolean keypress_callback(GtkWidget *widget, GdkEventKey *event, gpointe
     file_data *fd = (file_data*)data_pointer;
     printf("Event is %d, state %08x\n", event->keyval, event->state);
     if (event->keyval == 's') {
-        run_ticker = 1;
-        if (ticker_target >= 0) g_timeout_add(ticker_step, timeout_callback, data_pointer);
+        if (event->state & GDK_CONTROL_MASK) {
+            cairo_surface_write_to_png(fd->surface, "/tmp/plotter_export.png");
+        } else {
+            run_ticker = 1;
+            if (ticker_target >= 0) g_timeout_add(ticker_step, timeout_callback, data_pointer);
+        }
     } else if (event->keyval == 'e') {
         run_ticker = 0;
     } else if (event->keyval == 'i') {
