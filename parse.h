@@ -96,6 +96,8 @@ typedef struct expression_s {
     uint8_t flags;                          // Flags for the expression
     uint8_t color[4];                       // Color in RGBA, 0-255
     struct function_s *color_pointer;       // Pointer to a function block that produces the color
+    double *color_value;                    // Pointer to a list of colors (used with color_pointer)
+    uint32_t color_length;                  // Length of the list of colors (used with color_pointer)
     double *value;                          // Pointer to the value of the expression. Used when plotting
     uint32_t value_type;                    // Type of the last value of the expression. Used when plotting
     uint32_t cache_size;                    // Size of the cache array (used for explicit and implicit plotting)

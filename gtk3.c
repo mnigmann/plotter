@@ -1138,6 +1138,11 @@ void draw_implicit_rec(expression *expr, file_data *fd, cairo_t *cr, uint8_t *co
 }
 
 void draw_implicit(expression *expr, file_data *fd, uint8_t *color, cairo_t *cr) {
+    if ((expr->color_pointer) && (expr->color_length >= 3)) {
+        color[0] = (uint8_t)(expr->color_value[0]);
+        color[1] = (uint8_t)(expr->color_value[1]);
+        color[2] = (uint8_t)(expr->color_value[2]);
+    }
     SET_COLOR(cr, color);
     double temp[4] = {window_x0, window_x1, window_y0, window_y1};
     uint32_t (*old_oper)(void*, double*) = expr->func->oper;
@@ -1434,9 +1439,15 @@ void redraw_all(file_data *fd) {
             }
             print_object(color_type, stack+n_stack); printf("\n");
             color_len = color_type>>8;
+            expr->color_value = stack+n_stack;
+            expr->color_length = color_len;
             fd->n_stack += color_len;
             n_stack += color_len;
-        } else color_len = 0;
+        } else {
+            color_len = 0;
+            expr->color_length = 0;
+            expr->color_value = NULL;
+        }
         if (expr->flags & EXPRESSION_PLOTTABLE) {
             if ((expr->flags & EXPRESSION_FIXED) && ((expr->value_type & TYPE_MASK) == TYPE_POINT)) {
 #ifdef DEBUG_PLOT

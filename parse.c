@@ -1840,6 +1840,10 @@ expression *parse_file(file_data *fd, char *stringbuf) {
             uint32_t err = parse_latex_rec(line+i, read-i, function_list, stack, variable_list, stringbuf, &func_pos, &stack_size, &var_size, &string_size, &flags);
             if (err) fprintf(stderr, "\x1b[31mError code %08x while parsing\x1b[0m\n", err);
             printf("after parsing, func_pos: %d, string_size: %d, stack_size: %d, var_size: %d, last_pos: %d\n", func_pos, string_size, stack_size, var_size, last_pos);
+            if (exprpos->func->oper == func_color) {
+                exprpos->func = exprpos->func->first_arg;
+                exprpos->color_pointer = exprpos->func->next_arg;
+            }
             if ((exprpos->var) && (strcmp(exprpos->var->name, "r") == 0)) {
                 printf("Polar expression found\n");
                 shift_blocks(function_list, last_pos, func_pos-last_pos);
@@ -2034,10 +2038,6 @@ expression *parse_file(file_data *fd, char *stringbuf) {
     for (i=0; i < n_expr; i++) {
         expr = expression_list+i;
         expr->flags |= EXPRESSION_EVALUATE;
-        if (expr->func->oper == func_color) {
-            expr->func = expr->func->first_arg;
-            expr->color_pointer = expr->func->next_arg;
-        }
         printf("expression pointer at %p, function %p, variable %p, flags %02x, begin %d, dep %p, num %d, nf %d\n", expr, expr->func, expr->var, expr->flags, expr->expr_begin, expr->dependencies, expr->num_dependencies, expr->num_nonfixed_dependencies);
     }
 
