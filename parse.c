@@ -1508,6 +1508,7 @@ uint8_t evaluate_branch_rec(function *function_list, function *func, int *func_p
         else return 255;
     }
     uint8_t fixed = 255, f;
+    int n_arg = 0;
     while (arg) {
         f = evaluate_branch_rec(function_list, arg, func_pos, stackpos, include_fixed, local, n_local);
         // Only if the branch does not depend on and local variables can it be evaluated
@@ -1515,6 +1516,9 @@ uint8_t evaluate_branch_rec(function *function_list, function *func, int *func_p
         if (f == 254) fixed = 254;
         if (fixed != 254) {
             if (f < fixed) fixed = f;
+        }
+        if ((func->oper == func_integrate_gsl) && (n_arg == 3) && (f != 254) && (f >= resolves)) {
+            func->value = malloc(sizeof(integration_result));
         }
         arg = arg->next_arg;
     }
@@ -1530,7 +1534,7 @@ uint8_t evaluate_branch_rec(function *function_list, function *func, int *func_p
     while (arg) {
         if (arg->value_type & 0x20) {
             if (include_fixed) {
-                //printf("evaluating branch starting at %p, copying to %p\n", arg, function_list + *func_pos);
+                printf("evaluating branch starting at %p, copying to %p\n", arg, function_list + *func_pos);
                 argtype = arg->oper(arg, *stackpos);
                 memcpy(function_list + *func_pos, arg, sizeof(function));
                 arg->oper = func_value;
@@ -1541,7 +1545,7 @@ uint8_t evaluate_branch_rec(function *function_list, function *func, int *func_p
                 *stackpos = *stackpos + (argtype>>8);
                 *func_pos = *func_pos + 1;
             } else {
-                //printf("evaluating branch starting at %p and replacing\n", arg);
+                printf("evaluating branch starting at %p and replacing\n", arg);
                 argtype = arg->oper(arg, *stackpos);
                 arg->oper = func_value;
                 arg->inter = oper_lookup(func_value)->inter;
@@ -1959,10 +1963,6 @@ expression *parse_file(file_data *fd, char *stringbuf) {
     for (i=0; i < func_pos; i++) {
         if (function_list[i].oper == func_user_defined) {
             function_list[i].value = ((variable*)(function_list[i].value))->pointer;
-        }
-        if ((function_list[i].oper == func_integrate_gsl) && !(check_fixed(variable_list, function_list[i].first_arg->next_arg->next_arg->next_arg))) {
-            function_list[i].value = malloc(sizeof(integration_result));
-            printf("assigning %p to function %p (%d)\n", function_list[i].value, function_list+i, i);
         }
     }
 

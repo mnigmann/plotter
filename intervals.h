@@ -28,5 +28,8 @@ uint32_t interval_extract_x(void *f, double *hstackpos, double *lstackpos);
 uint32_t interval_extract_y(void *f, double *hstackpos, double *lstackpos);
 uint32_t interval_user_defined(void *f, double *hstackpos, double *lstackpos);
 uint32_t interval_integrate_gsl(void *f, double *hstackpos, double *lstackpos);
+
+uint32_t interval_sort(void *f, double *hstackpos, double *lstackpos);
+uint32_t interval_index(void *f, double *hstackpos, double *lstackpos);
 #endif
 

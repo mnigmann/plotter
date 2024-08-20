@@ -531,7 +531,7 @@ uint32_t func_user_defined(void *f, double *stackpos) {
             target_arg[varnum].type = type;
             st += len;
         }
-        //printf("argument is %08x:", type); print_object(type, target_arg[varnum].pointer);
+        //printf("argument is %08x: ", type); print_object(type, target_arg[varnum].pointer); printf("\n");
         varnum++;
         arg = arg->next_arg;
     } while (arg);
@@ -539,7 +539,7 @@ uint32_t func_user_defined(void *f, double *stackpos) {
     len = type>>8;
     // Shrink the stack by removing unused values
     for (int i=0; i < len; i++) stackpos[i] = stackpos[st+i]*SIGN_BIT(fs);
-    //printf("return type is %08x\n", type); print_object(type, stackpos); printf("\n");
+    //printf("return type is %08x: ", type); print_object(type, stackpos); printf("\n");
     return type;
 }
 
@@ -1670,8 +1670,12 @@ uint32_t func_integrate_gsl(void *f, double *stackpos) {
     } else status = gsl_integration_qags(&F, lbv, ubv, 0, 1e-7, 1000, w, &result, &error);
     stackpos[0] = (negate ? -result : result);
     if (status) {
-        stackpos[0] = NAN;
-        result = NAN;
+        printf("ERROR: error %d while integrating %p from %f to %f, value %f: %s\n", status, expr, lbv, ubv, result, gsl_strerror(status));
+        if (res) {
+            printf("cached %f from %f to %f\n", res->result, res->lbv, res->ubv);
+        }
+        //stackpos[0] = NAN;
+        //result = NAN;
     }
     /*else if (status) {
         FAIL("ERROR: error %d while integrating from %f to %f, value %f: %s\n", status, lbv, result, ubv, gsl_strerror(status));
@@ -1785,7 +1789,7 @@ const oper_data oper_list[N_OPERATORS] = {
     {func_user_defined, "func_user_defined", interval_user_defined},
 
     {func_list, "func_list", interval_list},
-    {func_index, "func_index", NULL},
+    {func_index, "func_index", interval_index},
     {func_point, "func_point", interval_point},
     {func_polygon, "func_polygon", NULL},
     {func_rgb, "func_rgb", NULL},
@@ -1806,7 +1810,7 @@ const oper_data oper_list[N_OPERATORS] = {
     {func_total, "func_total", NULL},
     {func_distance, "func_distance", NULL},
     {func_conditional, "func_conditional", NULL},
-    {func_sort, "func_sort", NULL},
+    {func_sort, "func_sort", interval_sort},
     {func_unique, "func_unique", NULL},
     {func_join, "func_join", NULL},
     {func_length, "func_length", NULL},

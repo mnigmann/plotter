@@ -16,6 +16,7 @@
 
 const oper_data *oper_lookup(uint32_t (*ptr)(void*, double*));
 double mfac(double x);
+int compare_doubles(const void *a, const void *b);
 
 uint32_t func_value(void *f, double *stackpos);
 

@@ -327,7 +327,7 @@ void draw_function_constant_ds_rec(expression *expr, file_data *fd, cairo_t *cr,
         eval_func(t_start, &xp, &yp, expr, stackpos);
         cairo_move_to(cr, SCALE_XK(xp), SCALE_YK(yp));
         eval_func(t_start+PLOT_DT_DERIV, &x, &y, expr, stackpos);
-        printf("intial point (%.12f, %.12f), (%.12f, %.12f), (%.12f, %.12f)\n", xpp, ypp, xp, yp, x, y);
+        //printf("intial point (%.12f, %.12f), (%.12f, %.12f), (%.12f, %.12f)\n", xpp, ypp, xp, yp, x, y);
         ds = hypot((x-xp)*xscale, (y-yp)*yscale);
         if (ds > PLOT_MAX_ARC_LENGTH*PLOT_DISCONTINUITY_THRESHOLD) {
             //printf("Possible discontinuity between %f and %f: (%f, %f) and (%f, %f)\n", t_start, tp, x, y, xp, yp);
@@ -495,7 +495,9 @@ void draw_function_constant_ds(expression *expr, file_data *fd, uint8_t *color, 
     expr->special_points = NULL;
     expr->n_special_points = 0;
     int func_pos = fd->n_func;
-    evaluate_branch(fd->function_list, expr->func, &func_pos, &stackpos, 1, NULL, 0);
+    for (int i=0; i < fd->n_expr; i++) 
+        evaluate_branch(fd->function_list, fd->expression_list[i].func, &func_pos, &stackpos, 1);
+    double *old_stack = fd->stack;
     fd->n_stack = stackpos - fd->stack;
     printf("evaluate_branch added %d function blocks\n", func_pos - fd->n_func);
     for (uint32_t i=0; i < n; i++) {
@@ -527,6 +529,7 @@ void draw_function_constant_ds(expression *expr, file_data *fd, uint8_t *color, 
             memcpy(fd->function_list + i, tempfunc, sizeof(function));
         }
     }
+    fd->stack = old_stack;
 }
 
 void follow_contour(expression *expr, file_data *fd, cairo_t *cr, uint8_t *color, double *area, double e00, double e10, double e11, double e01, uint8_t start_edge) {
@@ -770,6 +773,7 @@ void draw_implicit_rec(expression *expr, file_data *fd, cairo_t *cr, uint8_t *co
     double *stackpos = fd->stack + fd->n_stack;
     double *lstackpos = fd->lstack;
     eval_inter_2d(area, area+2, expr, stackpos, lstackpos);
+    double z0 = lstackpos[0], z1 = stackpos[0];
     uint32_t bufsize = (1<<(PLOT_IMPLICIT_HARDMAX - divisions))+1;
     //expr->func->inter(expr->func, stackpos, lstackpos);
     //niev++;
@@ -915,6 +919,9 @@ void draw_implicit_rec(expression *expr, file_data *fd, cairo_t *cr, uint8_t *co
             draw_implicit_rec(expr, fd, cr, color, area, divisions+1, vbuf+(bufsize>>1), hbuf+(bufsize>>1), 0x01);
             return;
         } else {
+            if ((!singular) && (!edges)) {
+                printf("Skipping box ([%f, %f], [%f, %f]) with corners %e, %e, %e, %e in (%e, %e)\n", x0, x1, y0, y1, e00, e10, e11, e01, z0, z1);
+            }
             vbuf[0] = e10;
             vbuf[bufsize-1] = e11;
             hbuf[0] = e01;

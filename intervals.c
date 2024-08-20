@@ -1001,3 +1001,82 @@ uint32_t interval_integrate_gsl(void *f, double *hstackpos, double *lstackpos) {
     return 1<<8;
 }
 
+uint32_t interval_sort(void *f, double *hstackpos, double *lstackpos) {
+    function *fs = (function*)f;
+    function *arg = fs->first_arg;
+    uint32_t argtype;
+    if (arg->next_arg) {
+        FAIL("ERROR: intervals for two-argument sort are not supported\n");
+    } else {
+        // Single-argument sort
+        argtype = arg->inter(arg, hstackpos, lstackpos);
+        if (!IS_TYPE(argtype, TYPE_DOUBLE)) FAIL("ERROR: can only sort list of doubles\n");
+        qsort(hstackpos, argtype>>8, sizeof(double), compare_doubles);
+        qsort(lstackpos, argtype>>8, sizeof(double), compare_doubles);
+        apply_sign(fs->value_type, hstackpos, lstackpos, 0, (argtype >> 8));
+        return argtype;
+    }
+}
+
+uint32_t interval_index(void *f, double *hstackpos, double *lstackpos) {
+    // Three ways of indexing a list:
+    //  * Boolean indexing, where the list is truncated as necesary -> list
+    //  * By list of indices -> list
+    //  * Singe numerical index -> value
+    function *fs = (function*)f;
+    function *arg = fs->first_arg;
+    uint32_t t1, t2, l1, l2;
+    t1 = arg->inter(arg, hstackpos, lstackpos);
+    l1 = t1 >> 8;
+    if (!(t1 & TYPE_LIST)) {
+        FAIL("ERROR: Cannot index a non-list (first argument %p)\n", arg);
+    }
+    
+    arg = arg->next_arg;
+    t2 = arg->inter(arg, hstackpos+l1, lstackpos+l1);
+    l2 = t2>>8;
+
+    uint8_t step = GET_STEP(t1);
+    //printf("indexing "); print_object(t1, val1); printf(" with (%08x) ", t2); print_object(t2, val2); printf("\n");
+    /*if ((t2 & TYPE_LIST) && ((t2 & TYPE_MASK) == TYPE_DOUBLE)) {
+        // List of indices
+        int32_t v2;
+        for (int i=0; i < l2; i++) {
+            v2 = step*((int32_t)val2[i]-1);
+            for (uint8_t j=0; j < step; j++) stackpos[l1+l2+i*step+j] = (((v2 >= l1) || (v2 < 0)) ? NAN : val1[v2+j]);
+        }
+        for (int i=0; i < l2*step; i++) stackpos[i] = stackpos[l1+l2+i]*SIGN_BIT(fs);
+        return ((step*l2)<<8) | (t1 & 0xff);
+    } else if ((t2 & TYPE_LIST) && ((t2 & TYPE_MASK) == TYPE_BOOLEAN)) {
+        // List of booleans
+        uint32_t lmin = (l1 < l2 ? l1 : l2);
+        uint32_t lr = 0;
+        for (int i=0; i < lmin; i++) {
+            if (val2[i] == 0) continue;
+            for (uint8_t j=0; j < step; j++) stackpos[lr+j] = val1[i*step+j]*SIGN_BIT(fs);
+            lr+=step;
+        }
+        return (lr << 8) | (t1 & 0xff);
+    } else*/ 
+    if ((t2 & TYPE_MASK) == TYPE_DOUBLE) {
+        int32_t v2l = step*(lstackpos[l1]-1), v2h = step*(hstackpos[l1]-1);
+        if ((v2l >= l1) || (v2h < 0)) {
+            for (uint8_t j=0; j < step; j++) {
+                lstackpos[j] = NAN;
+                hstackpos[j] = NAN;
+            }
+        } else {
+            for (uint8_t j=0; j < step; j++)
+            lstackpos[l1+l2] = INFINITY;
+            hstackpos[l1+l2] = -INFINITY;
+            for (int32_t ofs = v2l; ofs < v2h + step; ofs ++) {
+                int32_t target = l1+l2+(ofs%step);
+                if (lstackpos[ofs] < lstackpos[target]) lstackpos[target] = lstackpos[ofs];
+                if (hstackpos[ofs] > hstackpos[target]) hstackpos[target] = hstackpos[ofs];
+            }
+            apply_sign(fs->value_type, hstackpos, lstackpos, l1+l2, step);
+        }
+        return (step << 8) | (t1 & 0xff & ~TYPE_LIST);
+    } else FAIL("ERROR: invalid indexing operation: type %08x indexes type %08x\n", t2, t1);
+}
+
