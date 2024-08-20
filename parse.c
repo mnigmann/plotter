@@ -948,13 +948,14 @@ uint32_t parse_latex_rec(char *latex, int end, function *function_list, double *
                 strncpy(stringbuf + *string_size, latex+arg1_start+1, end-arg1_start-1);
                 stringbuf[*string_size + end-arg1_start-1] = 0;
                 printf("Creating integration variable %s from %.*s\n", stringbuf+ *string_size, end-arg1_start-1, latex+arg1_start+1);
-                variable_list[*var_size] = new_variable(stringbuf + *string_size, 0, VARIABLE_IN_SCOPE, NULL);
+                variable *intvar = variable_list+*var_size;
+                *intvar = new_variable(stringbuf + *string_size, 0, VARIABLE_IN_SCOPE, NULL);
                 *string_size += end-arg1_start;
                 *var_size += 1;
                 // Parse the expression
                 PARSE_LATEX_REC(latex+superscript+1, arg1_start-superscript-1);
-                variable_list[*var_size-1].flags &= ~VARIABLE_IN_SCOPE;
-                function_list[last_pos+1].value = variable_list + (*var_size-1);
+                intvar->flags &= ~VARIABLE_IN_SCOPE;
+                function_list[last_pos+1].value = intvar;
                 printf("parsing %.*s done, func_pos %d\n", end, latex, *func_pos);
                 return 0;
             } else if ((cmd_len == 12) && (strncmp(latex+cmd_start, "operatorname", cmd_len) == 0)) {
@@ -1466,87 +1467,99 @@ uint8_t check_fixed(variable *variable_list, function *func) {
  * and only evaluate when all of them have been defined
  * 
  * Return modes:
- * E (0x0): depends on variable and local variable
- * V (0x1): variable
- * L (0x3): fixed, constant, or depends on local variable
- * F (0x7): fixed or constant
+ *  255: Branch does not depend on any local variables
+ *  254: Branch is not fixed (depends on x or y) or depends on argument
+ *  n for n in 0-254: Branch depends on local variables at indices n or greater
  *
  */
-uint8_t evaluate_branch(function *function_list, function *func, int *func_pos, double **stackpos, uint8_t include_fixed, variable *local, int n_local) {
+uint8_t evaluate_branch_rec(function *function_list, function *func, int *func_pos, double **stackpos, uint8_t include_fixed, variable **local, int n_local) {
     function *arg = func->first_arg;
+    uint8_t resolves = 255;
     if ((func->oper == func_sum) || (func->oper == func_prod) || (func->oper == func_integrate_gsl)) {
         variable *idx = (variable*)(arg->value);
-        printf("idx id %p\n", idx);
-        idx->flags |= VARIABLE_NOT_FIXED;
-        local = idx;
+        resolves = n_local;
+        local[n_local] = idx;
+        n_local++;
     }
     // If the previous block ran then this one won't
-    if (arg == NULL) {
+    if (func->oper == func_value) {
         if (func->value_type & 0x40) {
             variable *var = ((variable*)(func->value));
-            if (strcmp(var->name, "\\pi") == 0) return 0x7;
+            if (strcmp(var->name, "\\pi") == 0) return 255;
+            // If the variable is a local variable, return its location in the variable tree
+            for (uint8_t n=0; n < n_local; n++) {
+                if (local[n] == var) {
+                    return n;
+                }
+            }
             if (include_fixed) {
-                if ((local) && (local <= var) && (var < (local+n_local))) {
-                    // Variable is a local variable
-                    //printf("found local variable %s (%p)\n", var->name, var);
-                    return 0x3;
-                } else if (var->flags & VARIABLE_NOT_FIXED) {
+                if ((var->flags & VARIABLE_NOT_FIXED) || (var->flags & VARIABLE_ARGUMENT)) {
                     // Variable depends on x or y
-                    //printf("found variable %s (%p)\n", var->name, var);
-                    return 0x1;
+                    return 254;
                 } else {
                     // Variable is fixed
-                    //printf("found fixed variable %s (%p)\n", var->name, var);
-                    return 0x7;
+                    return 255;
                 }
             }
             // Assume the variable can change
-            else return 0x1;
+            else return 254;
         }
         // The value is a constant
-        else return 0x7;
+        else return 255;
     }
-    uint8_t fixed = 0x7, f;
+    uint8_t fixed = 255, f;
     while (arg) {
-        f = evaluate_branch(function_list, arg, func_pos, stackpos, include_fixed, local, n_local);
+        f = evaluate_branch_rec(function_list, arg, func_pos, stackpos, include_fixed, local, n_local);
         // Only if the branch does not depend on and local variables can it be evaluated
-        if ((f == 0x7) && (arg->oper != func_value)) arg->value_type |= 0x20;
-        fixed &= f;
+        if ((f == 255) && (arg->oper != func_value)) arg->value_type |= 0x20;
+        if (f == 254) fixed = 254;
+        if (fixed != 254) {
+            if (f < fixed) fixed = f;
+        }
         arg = arg->next_arg;
     }
-    uint32_t argtype;
-    if (fixed <= 0x1) {
-        arg = func->first_arg;
-        while (arg) {
-            if (arg->value_type & 0x20) {
-                if (include_fixed) {
-                    //printf("evaluating branch starting at %p, copying to %p\n", arg, function_list + *func_pos);
-                    argtype = arg->oper(arg, *stackpos);
-                    memcpy(function_list + *func_pos, arg, sizeof(function));
-                    arg->oper = func_value;
-                    arg->inter = oper_lookup(func_value)->inter;
-                    arg->first_arg = function_list + *func_pos;
-                    arg->value = *stackpos;
-                    arg->value_type = argtype;
-                    *stackpos = *stackpos + (argtype>>8);
-                    *func_pos = *func_pos + 1;
-                } else {
-                    argtype = arg->oper(arg, *stackpos);
-                    arg->oper = func_value;
-                    arg->inter = oper_lookup(func_value)->inter;
-                    arg->first_arg = NULL;
-                    arg->value = *stackpos;
-                    arg->value_type = argtype;
-                    *stackpos = *stackpos + (argtype>>8);
-                }
-            }
-            arg = arg->next_arg;
-        }
+    if ((func->oper == func_sum) || (func->oper == func_prod) || (func->oper == func_integrate_gsl)) n_local--;
+    if ((fixed != 254) && (fixed >= resolves)) {
+        // If all can be evaluated, then go up one level.
+        // This check also allows evaluation if all sub-components
+        // depend only on local variables that are resolved at this stage
+        return 255;
     }
-    if ((func->oper == func_sum) || (func->oper == func_prod) || (func->oper == func_integrate_gsl)) local->flags &= ~VARIABLE_NOT_FIXED;
-    if (!fixed) fixed = 0x1;
-    if (fixed == 0x3) fixed = 0x7;
+    uint32_t argtype;
+    arg = func->first_arg;
+    while (arg) {
+        if (arg->value_type & 0x20) {
+            if (include_fixed) {
+                //printf("evaluating branch starting at %p, copying to %p\n", arg, function_list + *func_pos);
+                argtype = arg->oper(arg, *stackpos);
+                memcpy(function_list + *func_pos, arg, sizeof(function));
+                arg->oper = func_value;
+                arg->inter = oper_lookup(func_value)->inter;
+                arg->first_arg = function_list + *func_pos;
+                arg->value = *stackpos;
+                arg->value_type = argtype;
+                *stackpos = *stackpos + (argtype>>8);
+                *func_pos = *func_pos + 1;
+            } else {
+                //printf("evaluating branch starting at %p and replacing\n", arg);
+                argtype = arg->oper(arg, *stackpos);
+                arg->oper = func_value;
+                arg->inter = oper_lookup(func_value)->inter;
+                arg->first_arg = NULL;
+                arg->value = *stackpos;
+                arg->value_type = argtype;
+                *stackpos = *stackpos + (argtype>>8);
+            }
+        }
+        arg = arg->next_arg;
+    }
     return fixed;
+}
+
+void evaluate_branch(function *function_list, function *func, int *func_pos, double **stackpos, uint8_t include_fixed) {
+    variable **local = malloc(256*sizeof(variable*));
+    evaluate_branch_rec(function_list, func, func_pos, stackpos, include_fixed, local, 0);
+    free(local);
 }
 
 void load_file(char *fname, file_data *fd) {
@@ -1797,10 +1810,16 @@ expression *parse_file(file_data *fd, char *stringbuf) {
             exprpos->var->pointer = (double*)(function_list+func_pos);
             // Bring the arguments of the function into the local scope for parsing
             variable *first_arg = (exprpos->var)+1;
+            int nargs = 0;
             while (first_arg->flags & VARIABLE_ARGUMENT) {
                 first_arg->flags |= VARIABLE_IN_SCOPE;
                 first_arg++;
+                nargs++;
             }
+            /*if (nargs == 1) {
+                exprpos->flags &= ~EXPRESSION_FIXED;
+                exprpos->flags |= EXPRESSION_PLOTTABLE;
+            }*/
             // Parse the definition of the function
             last_pos = func_pos;
             int var_size = varpos - variable_list;
@@ -2063,7 +2082,7 @@ expression *parse_file(file_data *fd, char *stringbuf) {
     // Evaluate any components of expressions that do not depend on variables
     double *stackptr = stack + stack_size;
     for (i=0; i < n_expr; i++) {
-        evaluate_branch(function_list, expression_list[i].func, &func_pos, &stackptr, 0, NULL, 0);
+        evaluate_branch(function_list, expression_list[i].func, &func_pos, &stackptr, 0);
     }
     fd->n_stack = stackptr - stack;
 

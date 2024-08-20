@@ -151,7 +151,7 @@ void print_function_table(function *function_list, int func_pos);
 void load_file(char *fname, file_data *fd);
 void evaluate_from(file_data *fd, expression *top_expr);
 uint32_t parse_latex_rec(char *latex, int end, function *function_list, double *stack, variable *variable_list, char *stringbuf, int *func_pos, int *stack_size, int *var_size, int *string_size, uint8_t *flags);
-uint8_t evaluate_branch(function *function_list, function *func, int *func_pos, double **stackpos, uint8_t include_fixed, variable *local, int n_local);
+void evaluate_branch(function *function_list, function *func, int *func_pos, double **stackpos, uint8_t include_fixed);
 void parse_latex(char *latex, function *function_list, double *stack, variable *variable_list, char *stringbuf, int *stack_size, int *var_size, int *string_size);
 expression* parse_file(file_data *fd, char *stringbuf);
 
